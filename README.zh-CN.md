@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/banner-zh.jpg" alt="Mitsuke 見つけ：本地 AI 图片搜索。用文字、图片或两者组合，在自己的文件夹里找到那一张" width="820">
+<img src="docs/assets/banner-zh.jpg" alt="Mitsuke 見つけ：本地 AI 图片与视频搜索。用文字、图片或两者组合，在自己的文件夹里找到那一张" width="820">
 
 <p>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-6b4dff?style=flat-square"></a>
@@ -19,7 +19,7 @@
 
 </div>
 
-**Mitsuke 見つけ**（日语，意为“找到”）是给画师、美术和影视工作者用的本地 AI 图片搜索工具。用中文、日文、英文等多种语言描述一张图（“云雾缭绕的水墨山水”“foggy bridge at dawn”“雪の中の鳥居”），或者拿一张图来找（“像这张，但是夜晚”），Mitsuke 就能在你自己的文件夹里找到它：照片、相机 RAW、PSD、EXR / HDR，还有视频里对应的那个镜头。模型是 Google 的 [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2)，完全在你的 Mac 上运行，图片不会离开这台电脑。
+**Mitsuke 見つけ**（日语，意为“找到”）是给画师、美术和影视工作者用的本地 AI 图片与视频搜索工具。用中文、日文、英文等多种语言描述一张图（“云雾缭绕的水墨山水”“foggy bridge at dawn”“雪の中の鳥居”），或者拿一张图来找（“像这张，但是夜晚”），Mitsuke 就能在你自己的文件夹里找到它：照片、相机 RAW、PSD、EXR / HDR，还有视频里对应的那个镜头。模型是 Google 的 [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2)，完全在你的 Mac 上运行，图片不会离开这台电脑。
 
 可以用本地网页、命令行，也可以通过 MCP 让你的 AI agent（Claude Code、Codex、Cursor 等）帮你找。
 

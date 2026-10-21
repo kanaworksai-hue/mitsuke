@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/banner-ja.jpg" alt="Mitsuke 見つけ ローカル AI 画像検索：言葉でも、似た画像でも。手元のフォルダから、あの一枚を見つける" width="820">
+<img src="docs/assets/banner-ja.jpg" alt="Mitsuke 見つけ 画像と動画のローカル AI 検索：言葉でも、似た画像でも。手元のフォルダから、あの一枚を見つける" width="820">
 
 <p>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-6b4dff?style=flat-square"></a>
@@ -19,7 +19,7 @@
 
 </div>
 
-**Mitsuke 見つけ** は、イラストレーター、アーティスト、映像制作者のためのローカル AI 画像検索ツールです。日本語、英語、中国語など多くの言語で、「雪の中の鳥居」「foggy bridge at dawn」「云雾缭绕的水墨山水」のように言葉で説明するだけで探せます。画像を見せて「これに似た感じで、夜の画像」と探すこともできます。写真、カメラ RAW、PSD、EXR / HDR、そして動画の中の該当するカットまで、手元のフォルダから見つけます。Google の [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) がすべて Mac 上で動くので、画像が Mac の外に出ることはありません。
+**Mitsuke 見つけ** は、イラストレーター、アーティスト、映像制作者のための、画像と動画のローカル AI 検索ツールです。日本語、英語、中国語など多くの言語で、「雪の中の鳥居」「foggy bridge at dawn」「云雾缭绕的水墨山水」のように言葉で説明するだけで探せます。画像を見せて「これに似た感じで、夜の画像」と探すこともできます。写真、カメラ RAW、PSD、EXR / HDR、そして動画の中の該当するカットまで、手元のフォルダから見つけます。Google の [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) がすべて Mac 上で動くので、画像が Mac の外に出ることはありません。
 
 ローカルの Web アプリやコマンドラインで使えるほか、MCP 経由で AI エージェント（Claude Code、Codex、Cursor など）に探してもらうこともできます。
 

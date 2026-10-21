@@ -681,7 +681,7 @@ def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     # SUPPRESS on the sub-command copy so `mitsuke --json search …` and `mitsuke search … --json` both work
     common.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="machine-readable output (for agents and scripts)")
-    p = _Parser(prog="mitsuke", description="Local AI image search (EmbeddingGemma 2).")
+    p = _Parser(prog="mitsuke", description="Local AI image and video search (EmbeddingGemma 2).")
     p.add_argument("--json", action="store_true", help="machine-readable output (for agents and scripts)")
     p.add_argument("--version", action="version", version=f"mitsuke {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="command", parser_class=_Parser)

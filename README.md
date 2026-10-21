@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/banner-en.jpg" alt="Mitsuke 見つけ: local AI image search. Find any picture in your own folders by words, by example, or both" width="820">
+<img src="docs/assets/banner-en.jpg" alt="Mitsuke 見つけ: local AI image and video search. Find any picture in your own folders by words, by example, or both" width="820">
 
 <p>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-6b4dff?style=flat-square"></a>
@@ -19,7 +19,7 @@
 
 </div>
 
-**Mitsuke 見つけ** (Japanese for "find") is a local AI image search tool for artists, illustrators and filmmakers. Describe a picture in English, Japanese, Chinese or many other languages ("foggy bridge at dawn", "雪の中の鳥居", "云雾缭绕的水墨山水"), or show it another picture ("like this, but at night"). Mitsuke finds it in your own folders: photos, camera RAW, PSD, EXR / HDR, and the right shot inside your videos. It runs entirely on your Mac using Google's [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2), so your images never leave your computer.
+**Mitsuke 見つけ** (Japanese for "find") is a local AI image and video search tool for artists, illustrators and filmmakers. Describe a picture in English, Japanese, Chinese or many other languages ("foggy bridge at dawn", "雪の中の鳥居", "云雾缭绕的水墨山水"), or show it another picture ("like this, but at night"). Mitsuke finds it in your own folders: photos, camera RAW, PSD, EXR / HDR, and the right shot inside your videos. It runs entirely on your Mac using Google's [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2), so your images never leave your computer.
 
 Use it in a local web app, from the command line, or let your AI agent (Claude Code, Codex, Cursor, …) search for you through MCP.
 

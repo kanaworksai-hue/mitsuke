@@ -1,6 +1,6 @@
 ---
 name: mitsuke
-description: Search the user's own image and video folders on this Mac with Mitsuke 見つけ (local AI image search, EmbeddingGemma 2) — by description in any language, by example image, or image + words ("like this, but at night"); collect picks on moodboards and hand the user a link to the web app. Use whenever the user wants to find a picture, photo, reference, texture, concept art, RAW / PSD / EXR / HDR file or a shot inside their videos in their own files, asks "where is that image of…", wants references for a mood or a moodboard, or wants to add folders to or check the image index — even if they do not say "Mitsuke".
+description: Search the user's own image and video folders on this Mac with Mitsuke 見つけ (local AI image and video search, EmbeddingGemma 2) — by description in any language, by example image, or image + words ("like this, but at night"); collect picks on moodboards and hand the user a link to the web app. Use whenever the user wants to find a picture, photo, reference, texture, concept art, RAW / PSD / EXR / HDR file or a shot inside their videos in their own files, asks "where is that image of…", wants references for a mood or a moodboard, or wants to add folders to or check the image index — even if they do not say "Mitsuke".
 license: MIT
 compatibility: macOS on Apple Silicon. Needs the `mitsuke` command (see INSTALL.md in the Mitsuke repository); the MCP tools are used when the `mitsuke` MCP server is connected.
 ---

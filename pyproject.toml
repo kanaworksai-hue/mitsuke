@@ -1,7 +1,7 @@
 [project]
 name = "mitsuke"
 version = "0.3.0"
-description = "Local, AI-native image search for artists and film makers (EmbeddingGemma 2)"
+description = "Local, AI-native image and video search for artists and film makers (EmbeddingGemma 2)"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
