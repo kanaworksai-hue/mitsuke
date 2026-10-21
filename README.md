@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/banner-en.jpg" alt="Mitsuke 見つけ: local AI image search for your own folders, by words, by example, or both" width="820">
+<img src="docs/assets/banner-en.jpg" alt="Mitsuke 見つけ: local AI image search. Find any picture in your own folders by words, by example, or both" width="820">
 
 <p>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-6b4dff?style=flat-square"></a>
@@ -19,29 +19,29 @@
 
 </div>
 
-**Mitsuke 見つけ** ("find it") is a local, AI-native image search for artists, illustrators and film makers. Describe a picture in any language ("foggy bridge at dawn", "雪の中の鳥居", "云雾缭绕的水墨山水") or show it another picture ("like this, but at night"), and Mitsuke finds it in your own folders: photos, camera RAW, PSD, EXR / HDR, and the right shot inside your videos. It runs on your Mac with Google's [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2). Your images never leave it.
+**Mitsuke 見つけ** (Japanese for "find") is a local AI image search tool for artists, illustrators and filmmakers. Describe a picture in English, Japanese, Chinese or many other languages ("foggy bridge at dawn", "雪の中の鳥居", "云雾缭绕的水墨山水"), or show it another picture ("like this, but at night"). Mitsuke finds it in your own folders: photos, camera RAW, PSD, EXR / HDR, and the right shot inside your videos. It runs entirely on your Mac using Google's [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2), so your images never leave your computer.
 
 Use it in a local web app, from the command line, or let your AI agent (Claude Code, Codex, Cursor, …) search for you through MCP.
 
 <p align="center">
   <img src="docs/assets/demo-en.jpg" alt="The Mitsuke web app: a search for 'foggy bridge at dawn' finds fog photos of bridges and ukiyo-e prints of bridges in a reference library" width="820">
-  <br><sub>The web app searching a reference library of public-domain images. Ukiyo-e bridges show up next to the photos: the search goes by meaning, not by file name.</sub>
+  <br><sub>The web app searching a reference library of public-domain images. Ukiyo-e bridges show up next to the photos: the search goes by what is in the picture, not by file name.</sub>
 </p>
 
 ## ✨ Highlights
 
 <table>
 <tr>
-<td align="center" width="25%">🔎<br><b>Search by meaning</b><br><sub>Words in any language, an example image, or both, with a slider between them</sub></td>
+<td align="center" width="25%">🔎<br><b>Search by meaning</b><br><sub>Words, an example image, or both, with a slider to balance them</sub></td>
 <td align="center" width="25%">🎞️<br><b>Made for real libraries</b><br><sub>RAW, PSD / PSB, EXR / HDR, HEIC, and videos searched shot by shot</sub></td>
-<td align="center" width="25%">🤖<br><b>Agent-ready</b><br><sub>MCP server, JSON CLI and a skill, so your agent can find and show images</sub></td>
+<td align="center" width="25%">🤖<br><b>Agent-ready</b><br><sub>MCP server, JSON CLI and a skill, so your agent can find images and show them to you</sub></td>
 <td align="center" width="25%">🔒<br><b>Local</b><br><sub>Runs on Apple Silicon with MLX. No account, no upload, no API key</sub></td>
 </tr>
 </table>
 
-- **Keeps up with your folders:** new, changed, moved and renamed files are picked up. Moves and renames are recognised and not indexed again.
-- **Moodboards:** collect results on boards, then search for "more like this board".
-- **Never touches your files:** Mitsuke only reads them. The index and thumbnails live in their own folders.
+- **Keeps up with your folders:** while the web app or `mitsuke index --watch` is running, new and changed files are indexed automatically. Moved and renamed files are recognized and keep their index entries.
+- **Moodboards:** collect results on moodboards, then use a whole moodboard as your query.
+- **Never touches your files:** Mitsuke only reads them. The index and thumbnails are stored in separate folders.
 
 ## 🧭 How it works
 
@@ -51,18 +51,20 @@ flowchart LR
     I --> M["EmbeddingGemma 2<br/>MLX on Apple Silicon"]
     M --> D["Local index<br/>SQLite + vectors"]
     Q["“foggy bridge at dawn”<br/>or an example image"] --> M
-    D --> R["Web app · CLI · MCP<br/>for you and your agent"]
+    M --> S["Search<br/>compare with every indexed image"]
+    D --> S
+    S --> R["Web app · CLI · MCP<br/>for you and your agent"]
 ```
 
-Images and words go into the same embedding space, so a sentence, a picture, or a mix of both can be compared with every image in your library.
+Images and words are mapped into the same embedding space, so a sentence, a picture, or a mix of both can be compared with every image in your library.
 
 ## 🚀 Quick start
 
 **Requirements:**
 
 - Apple Silicon Mac (M1 or later)
-- [`uv`](https://docs.astral.sh/uv/) (`brew install uv`). It brings its own Python.
-- About 4 GB of free disk: the model is about 1.5 GB, and the packages and the index take the rest
+- [`uv`](https://docs.astral.sh/uv/) (`brew install uv`). It installs Python for you.
+- About 4 GB of free disk space: the model is about 1.5 GB, and the packages and the index take the rest
 
 > [!TIP]
 > **Let your agent install it.** Paste this into Claude Code, Codex or another coding agent:
@@ -78,26 +80,27 @@ mitsuke doctor --download      # checks the setup and downloads the model (once)
 mitsuke serve --open           # the web app at http://127.0.0.1:8737; add folders there
 ```
 
-Or from the command line:
+Or skip the web app and do it all from the command line:
 
 ```bash
 mitsuke add ~/Pictures/References ~/Work/Concept
-mitsuke index                  # safe to stop with Ctrl-C and run again; it continues
+mitsuke index                  # safe to stop with Ctrl-C; run it again to resume
 mitsuke search "雪の中の鳥居"
 mitsuke similar ~/Desktop/this_composition.jpg
 ```
 
 ## 🤖 Use it from your agent
 
-Once it is installed, just ask: *"find the foggy harbour photos from last year's trip"*, *"references for a candle-lit interior, put the best ones on a board"*, *"the shot in my videos where the dragon appears"*. The agent uses one of these:
+Once it is installed, just ask: *"find the foggy harbor photos in my Japan trip folder"*, *"collect references for a candle-lit interior and put the best ones on a moodboard"*, *"find the shot in my videos where the dragon appears"*. The agent uses one of these:
 
-- **MCP server:** `mitsuke mcp` (stdio). The model stays loaded between calls, so searches after the first are fast.
+- **MCP server:** `mitsuke mcp` (stdio). The model stays loaded after the first call, so later searches are fast.
 
   ```bash
-  claude mcp add --scope user mitsuke -- "$(command -v mitsuke)" mcp
+  claude mcp add --scope user mitsuke -- "$(command -v mitsuke)" mcp   # Claude Code
+  codex mcp add mitsuke -- "$(command -v mitsuke)" mcp                 # Codex
   ```
 
-  Tools: `search` (words, example images, a moodboard, or a mix), `similar`, `view_images` (a contact sheet the agent can look at), `file_info`, `open_file`, moodboard tools, `status`, `add_folder`, `remove_folder`, `index`, `web_link`.
+  Tools: `search` (words, example images, a moodboard, or a mix), `similar`, `view_images` (a contact sheet the agent can look at), `file_info`, `open_file`, seven moodboard tools, `status`, `add_folder`, `remove_folder`, `index`, `web_link`.
 - **CLI:** every command takes `--json`, for example `mitsuke search "at night" --like 12 --json`.
 - **Skill:** `mitsuke skill install` puts a skill in `~/.claude/skills/mitsuke`. It tells the agent when to use Mitsuke and how to show you results, with a link that opens the same search in the web app.
 
@@ -115,25 +118,25 @@ If you set `HF_HOME` or `MITSUKE_HOME` in your shell, pass them in an `"env"` bl
 
 ## 🖼️ The web app
 
-`mitsuke serve --open` starts it. It only listens on `127.0.0.1`, and it keeps the index current while it runs. The interface is in English, Japanese and Chinese, with dark and light themes.
+`mitsuke serve --open` starts it. It only listens on `127.0.0.1` and keeps the index up to date while it runs. The interface is in English, Japanese and Chinese, with dark and light themes.
 
-- **One search box for everything:** type in any language (your own dictation tool works too), or drop, paste or pick an image. Images and words combine ("this composition" + "at night") with a slider between the two.
-- **Video:** each video is cut into shots. A search lands on the matching shot and plays it from there.
-- **Moodboards:** drag results onto a board (or press <kbd>B</kbd>), then search like the whole board.
-- **Made for working:** square grid or true-shape rows, a size slider, full-screen preview (<kbd>Space</kbd>), arrow keys, <kbd>S</kbd> for similar images, <kbd>R</kbd> to reveal in Finder. Drag a result into Photoshop or Finder to get the original file. Filter by folder and file type.
+- **One search box for everything:** type in any language (your usual dictation tool works too), or drop, paste or pick an image. Images and words combine ("this composition" + "at night"), with a slider to balance the two.
+- **Video:** each video is split into shots. A search lands on the matching shot and plays it from there.
+- **Moodboards:** drag results onto a moodboard (or press <kbd>B</kbd>), then use the whole moodboard as your query.
+- **Built for daily work:** a square grid or rows that keep each image's shape, a size slider, full-screen preview (<kbd>Space</kbd>), arrow keys, <kbd>S</kbd> for similar images, <kbd>R</kbd> to reveal in Finder, and filters by folder and file type. In Chrome or Edge, drag a result to Finder to get a copy of the original file.
 
 ## 📋 Commands
 
 | Command | What it does |
 |---|---|
-| `mitsuke add <folder>…` / `remove <folder>` / `roots` | Manage library folders (removing never touches your files) |
-| `mitsuke index [--watch] [--quality fast\|default\|best]` | Index new and changed images. `--watch` keeps running and follows changes |
+| `mitsuke add <folder>…` / `remove <folder>…` / `roots` | Manage library folders (removing never touches your files) |
+| `mitsuke index [--watch] [--quality fast\|default\|best]` | Index new and changed files. `--watch` keeps running and follows changes |
 | `mitsuke search "<text>" [-k 20] [--root F] [--kind raw,psd,exr,video]` | Find images (and video shots) by description |
-| `mitsuke search ["<text>"] --like <image> [--board ID] [--text-weight 0.5]` | Image + words ("like this, but at night"), or a whole moodboard as the query |
+| `mitsuke search ["<text>"] [--like <image>…] [--board ID] [--text-weight 0.5]` | Image + words ("like this, but at night"), or a whole moodboard as the query |
 | `mitsuke similar <image or id>` | Find images that look like an image (inside or outside the library) |
 | `mitsuke board list\|create\|show\|add\|remove\|rename\|delete` | Moodboards (shared with the web app) |
 | `mitsuke show <image or id> [--open\|--reveal]` | Details of one file; open it or show it in Finder |
-| `mitsuke web ["<text>"] [--board ID] [--start] [--open]` | A link into the web app on a search or a board (`--start` launches it in the background) |
+| `mitsuke web ["<text>"] [--board ID] [--start] [--open]` | A link that opens a search or a moodboard in the web app (`--start` launches the app in the background) |
 | `mitsuke serve [--port 8737] [--open] [--no-index]` | The web app (local only); indexes and watches folders in the background |
 | `mitsuke mcp` | MCP server on stdin/stdout for AI agents |
 | `mitsuke skill install [--dir D]` | Install the agent skill (default `~/.claude/skills`) |
@@ -145,7 +148,7 @@ Every command accepts `--json` for agents and scripts (`index` prints one JSON e
 <details>
 <summary><b>Supported formats</b></summary>
 
-JPEG, PNG, WebP, HEIC / HEIF, AVIF, TIFF (including 16-bit), GIF, BMP, JPEG 2000, PSD / PSB, camera RAW (CR2, CR3, NEF, ARW, RAF, ORF, RW2, DNG and more), OpenEXR and Radiance HDR (tone-mapped for search), and video (MP4, MOV, M4V, MKV, WebM, AVI, searched shot by shot).
+JPEG, PNG, WebP, HEIC / HEIF, AVIF, TIFF (including 16-bit), GIF, BMP, TGA, JPEG 2000, PSD / PSB, camera RAW (CR2, CR3, NEF, ARW, RAF, ORF, RW2, DNG and more), OpenEXR and Radiance HDR (tone-mapped for search), and video (MP4, MOV, M4V, MKV, WebM, AVI, searched shot by shot).
 </details>
 
 <details>
@@ -153,7 +156,7 @@ JPEG, PNG, WebP, HEIC / HEIF, AVIF, TIFF (including 16-bit), GIF, BMP, JPEG 2000
 
 - Index: `~/Library/Application Support/Mitsuke`
 - Thumbnails: `~/Library/Caches/Mitsuke`
-- Model: the Hugging Face cache (`~/.cache/huggingface`)
+- Model: the Hugging Face cache (`~/.cache/huggingface`, or `$HF_HOME` if set)
 
 Set `MITSUKE_HOME=<folder>` to keep the index and thumbnails somewhere else.
 </details>
@@ -163,7 +166,7 @@ Set `MITSUKE_HOME=<folder>` to keep the index and thumbnails somewhere else.
 <details>
 <summary><b>Does anything get uploaded?</b></summary>
 
-No. The model runs on your Mac. The only download is the model itself, once, from Hugging Face. The web app only listens on `127.0.0.1`.
+No. Your images, searches and index stay on your Mac. Installing downloads the Python packages, and the model is downloaded once from Hugging Face. After that, the Hugging Face library checks for model updates when it loads the model; set `HF_HUB_OFFLINE=1` to turn that off. The web app only listens on `127.0.0.1`.
 </details>
 
 <details>
@@ -175,7 +178,7 @@ Not yet. It needs an Apple Silicon Mac, because the model runs on [MLX](https://
 <details>
 <summary><b>Which languages can I search in?</b></summary>
 
-EmbeddingGemma 2 is multilingual. English, Japanese and Chinese work well, and mixing them is fine. For spoken queries, use your Mac's own dictation or any voice input tool.
+EmbeddingGemma 2 is multilingual. English, Japanese and Chinese all work well, and you can mix them. To search by voice, use your Mac's dictation or any voice input tool.
 </details>
 
 <details>
@@ -187,7 +190,7 @@ No. Videos are searched by what is on screen, shot by shot.
 <details>
 <summary><b>CLI or MCP, which should my agent use?</b></summary>
 
-MCP if the agent's client supports it and you will search often: the model stays loaded. The CLI loads the model on each call (a few seconds) but keeps nothing running. [`INSTALL.md`](INSTALL.md) has the full checklist the agent uses to decide.
+MCP, if your agent's app supports it and you search often: the model stays loaded (a few GB of memory while the session is open). The CLI loads the model on each call (a few seconds) but leaves nothing running. [`INSTALL.md`](INSTALL.md) has the full checklist the agent uses to decide.
 </details>
 
 ## 🗺️ Roadmap
@@ -202,10 +205,10 @@ Issues and pull requests are welcome.
 
 ## ⭐ Like it? Star it
 
-If Mitsuke found an image you needed, please click **⭐ Star** at the top of the [repository page](https://github.com/kanaworksai-hue/mitsuke). It's free, takes one second, and helps more than it looks:
+If Mitsuke found an image you needed, please click **⭐ Star** at the top of the [repository page](https://github.com/kanaworksai-hue/mitsuke). It's free, takes a second, and helps more than you might think:
 
-- **More people find it.** Stars make the project easier to discover on GitHub, so more artists and film makers get to use it.
-- **It keeps updates coming.** Every star tells me someone finds this useful, and that keeps the next features coming.
+- **More people find it.** Stars make the project easier to discover on GitHub, so more artists and filmmakers get to use it.
+- **It keeps the project going.** Every star shows that people find Mitsuke useful, and that's what keeps new features coming.
 
 Other ways to help: [open an issue](https://github.com/kanaworksai-hue/mitsuke/issues) for a bug or an idea, or share how you use it on X and tag [@KanaWorks_AI](https://x.com/KanaWorks_AI).
 
@@ -249,6 +252,6 @@ This is an independent project. It is not affiliated with or endorsed by Google,
 
 <p><b>Made with ♥ by <a href="https://x.com/KanaWorks_AI">KanaWorks_AI</a></b></p>
 
-<p><sub>If Mitsuke saves you time, a ⭐ keeps the updates coming and helps others find it. More projects: <a href="https://github.com/kanaworksai-hue">github.com/kanaworksai-hue</a></sub></p>
+<p><sub>If Mitsuke saves you time, a ⭐ helps the project keep going and helps others find it. More projects: <a href="https://github.com/kanaworksai-hue">github.com/kanaworksai-hue</a></sub></p>
 
 </div>
