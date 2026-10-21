@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/banner-zh.jpg" alt="Mitsuke 見つけ：本地 AI 图片与视频搜索。用文字、图片或两者组合，在自己的文件夹里找到那一张" width="820">
+<img src="docs/assets/banner-zh.jpg" alt="Mitsuke 見つけ：本地 AI 图片与视频搜索。用文字、图片或两者组合，在自己的文件夹里找到那张图、那个镜头" width="820">
 
 <p>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-6b4dff?style=flat-square"></a>

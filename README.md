@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/banner-en.jpg" alt="Mitsuke 見つけ: local AI image and video search. Find any picture in your own folders by words, by example, or both" width="820">
+<img src="docs/assets/banner-en.jpg" alt="Mitsuke 見つけ: local AI image and video search. Find any picture or video shot by words, by example, or both" width="820">
 
 <p>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-6b4dff?style=flat-square"></a>
