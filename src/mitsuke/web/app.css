@@ -1,12 +1,12 @@
 /* Mitsuke web app. Dark by default (judging colour on a dark surround), light theme available. */
 :root, [data-theme="dark"] {
   --bg: #1c1c1e; --side: #232326; --cell: #141416; --line: #333338; --fg: #e8e8eb; --dim: #8e8e96;
-  --acc: #4c9dff; --acc-fg: #fff; --warm: #ffb547; --sel: #1d2633; --chip: #2f3a4a; --hover: #2c2c31;
+  --acc: #4c9dff; --acc-fg: #fff; --pri: #2a6fdb; --warm: #ffb547; --sel: #1d2633; --chip: #2f3a4a; --hover: #2c2c31;
   --loupe: rgba(8, 8, 9, .97); --shadow: 0 10px 40px rgba(0, 0, 0, .5); --danger: #ff6b5e;
 }
 [data-theme="light"] {
   --bg: #f4f2ee; --side: #fbfaf7; --cell: #e9e5de; --line: #e0dbd3; --fg: #1d1c1a; --dim: #6f6a63;
-  --acc: #e2572b; --acc-fg: #fff; --warm: #e2572b; --sel: #fbe3d8; --chip: #f1ebe2; --hover: #efebe4;
+  --acc: #e2572b; --acc-fg: #fff; --pri: #c84a1f; --warm: #e2572b; --sel: #fbe3d8; --chip: #f1ebe2; --hover: #efebe4;
   --loupe: rgba(244, 242, 238, .98); --shadow: 0 10px 40px rgba(60, 40, 20, .18); --danger: #c0392b;
 }
 * { box-sizing: border-box; }
@@ -104,7 +104,7 @@ svg { flex: none; }
 .empty .addrow input { flex: 1; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 7px; background: var(--hover); white-space: nowrap; }
 .btn:hover { filter: brightness(1.15); }
-.btn.pri { background: var(--acc); color: var(--acc-fg); }
+.btn.pri { background: var(--pri); color: var(--acc-fg); } /* darker than --acc: white text ≥ 4.5:1 */
 .progress { height: 4px; background: var(--hover); border-radius: 2px; overflow: hidden; margin: 14px auto; max-width: 360px; }
 .progress i { display: block; height: 100%; background: var(--acc); }
 
