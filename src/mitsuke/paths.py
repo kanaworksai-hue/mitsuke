@@ -9,7 +9,14 @@ from __future__ import annotations
 
 import os
 import sys
+import unicodedata
 from pathlib import Path
+
+
+def nfc(path: str) -> str:
+    """macOS file names can be stored decomposed (NFD: カ + ゛, a + ¨) or composed (NFC) and a typed or pasted path
+    may use the other form; the file system treats both as the same name, so compare paths in one form."""
+    return unicodedata.normalize("NFC", path)
 
 
 def home_dir() -> Path:

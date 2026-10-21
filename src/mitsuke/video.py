@@ -3,7 +3,9 @@
 1. Sample one frame per second (OpenCV; long videos are sampled evenly, at most MAX_SAMPLES frames).
 2. Cut where consecutive samples differ a lot (colour histogram distance) → shots, accurate to the sample step.
 3. Long shots are split into pieces of at most MAX_SEGMENT seconds, so a slow pan still finds its later content.
-4. The middle sample of each segment is the frame that gets embedded and shown as its thumbnail.
+4. The middle sample of each segment is the frame that gets embedded and shown as its thumbnail. Black frames
+   (fades, blank leaders) are skipped for a lit sample of the same segment; all-black segments are dropped, since
+   they would only clutter the results (a video that is black throughout keeps them).
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ MAX_SAMPLES = 900
 MAX_SEGMENT = 8.0
 MAX_SEGMENTS = 300
 CUT = 0.35  # Bhattacharyya distance between HSV histograms that counts as a cut
+DARK = 24  # a frame whose 99th-percentile luma is below this (0–255) counts as black
 SEQUENTIAL_MAX_S = 180  # shorter videos are decoded straight through (seeking is slow on long-GOP files)
 
 
@@ -99,6 +102,10 @@ def sample(path: str, max_side: int = 512) -> tuple[VideoInfo, list[tuple[float,
         cap.release()
 
 
+def _dark(im: Image.Image) -> bool:
+    return float(np.percentile(np.asarray(im.convert("L")), 99)) < DARK
+
+
 def segment(samples, duration: float) -> list[Segment]:
     import cv2
 
@@ -114,15 +121,20 @@ def segment(samples, duration: float) -> list[Segment]:
     times = [s[0] for s in samples]
     # Boundaries halfway between samples; the first starts at 0, the last ends at the video's end.
     bounds = [0.0] + [(times[i - 1] + times[i]) / 2 for i in range(1, len(times))] + [max(duration, times[-1])]
-    segs = []
+    dark = [_dark(s[1]) for s in samples]
+    segs, black = [], []
     for shot in shots:
         t0, t1 = bounds[shot[0]], bounds[shot[-1] + 1]
         parts = max(1, math.ceil((t1 - t0) / MAX_SEGMENT - 1e-9))
         per = len(shot) / parts
         for p in range(parts):
             idx = shot[int(p * per) : max(int(p * per) + 1, int((p + 1) * per))]
-            mid = idx[len(idx) // 2]
+            # the sample nearest the middle that is not black
+            mid = min(idx, key=lambda i: (dark[i], abs(i - idx[len(idx) // 2])))
             segs.append(Segment(round(bounds[idx[0]], 3), round(bounds[idx[-1] + 1], 3), round(times[mid], 3), samples[mid][1]))
+            black.append(dark[mid])
+    if not all(black):
+        segs = [s for s, b in zip(segs, black) if not b]
     if len(segs) > MAX_SEGMENTS:  # keep an even spread
         keep = np.linspace(0, len(segs) - 1, MAX_SEGMENTS).round().astype(int)
         segs = [segs[i] for i in sorted(set(keep))]

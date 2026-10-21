@@ -92,16 +92,22 @@ def query_vectors(store, model: str, refs, embed_images=None, tokens: int = 140)
                 raise BadRequest(f"cannot read this image: {type(e).__name__}") from None
             v = embed_images([im])[0]
         if v is None:
-            raise NotFound(f"not in the index (yet): {ref}")
+            name = (f"s{r['shot']}" if "shot" in r else r.get("path") or f"#{r['file']}") if isinstance(ref, dict) else ref
+            raise NotFound(f"not in the index (yet): {name}")
         vecs.append(v)
     return vecs, ex_files, ex_shots
 
 
 def board_refs(store, bid: int) -> list[dict]:
+    """The board's images as query references. Items without a vector (a file that failed to decode, or changed
+    and waits for re-indexing) are left out, so one of them does not break searching by the whole board."""
     if store.db.execute("SELECT 1 FROM boards WHERE id=?", (bid,)).fetchone() is None:
         raise NotFound(f"no board #{bid}")
     return [{"shot": i["shot_id"]} if i["shot_id"] else {"file": i["file_id"]}
-            for i in store.db.execute("SELECT file_id, shot_id FROM board_items WHERE board_id=? ORDER BY added_at", (bid,))]
+            for i in store.db.execute(
+                "SELECT file_id, shot_id FROM board_items i WHERE board_id=? AND CASE WHEN shot_id "
+                "THEN EXISTS (SELECT 1 FROM shots s WHERE s.id=i.shot_id) "
+                "ELSE EXISTS (SELECT 1 FROM vectors v WHERE v.file_id=i.file_id) END ORDER BY added_at", (bid,))]
 
 
 # --- folders ----------------------------------------------------------------------------------
@@ -110,9 +116,11 @@ def add_folder(store, path: str) -> dict:
     p = os.path.realpath(os.path.abspath(os.path.expanduser(str(path).strip())))
     if not os.path.isdir(p):
         raise BadRequest(f"not a folder: {path}")
-    for r in store.roots():  # nested roots would index the same files twice
-        rp = r["path"]
-        if p != rp and (p.startswith(rp + "/") or rp.startswith(p + "/")):
+    for r in store.roots():  # nested roots (or the same folder spelled in NFC / NFD) would index files twice
+        rp, a, b = r["path"], paths.nfc(p), paths.nfc(r["path"])
+        if a == b:
+            return {"id": r["id"], "path": rp, "new": False}
+        if a.startswith(b + "/") or b.startswith(a + "/"):
             raise BadRequest(f"{p} overlaps with an existing folder {rp}; remove one of them first")
     rid, new = store.add_root(p)
     return {"id": rid, "path": p, "new": new}
@@ -149,6 +157,10 @@ def item(store, fid: int) -> dict:
         out.update(exists=False)
     out["root"] = r["root"]
     out["status"] = r["status"]
+    if r["status"] == "error":
+        out["error"] = r["error"]
+    if out["thumb"] and not os.path.exists(out["thumb"]):  # not indexed (yet), or it failed to decode
+        out["thumb"] = None
     out["method"] = r["method"]
     if r["kind"] == "video":
         out["shots"] = [

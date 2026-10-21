@@ -136,7 +136,7 @@ def test_index_lock_shared(mcp, library):
     with open(paths.home_dir() / "index.lock", "a+") as f:
         fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
         ix = mcp.tool("index", wait_seconds=10)
-        assert ix["indexing"]["state"] == "external" and ix["indexed"] == 0
+        assert ix["indexing"]["state"] == "external" and ix["indexed"] == 0 and ix["done"] is False
         fcntl.flock(f, fcntl.LOCK_UN)
     ix = mcp.tool("index", wait_seconds=60)
     assert ix["indexed"] == 7
@@ -150,6 +150,78 @@ def test_stdout_stays_clean(mcp):
     mcp.p.stdin.write("not json\n")
     mcp.p.stdin.flush()
     assert json.loads(mcp.p.stdout.readline())["error"]["code"] == -32700
+
+
+def test_arguments_checked(mcp, library, tmp_path):
+    """Arguments are checked against the input schema: clear isError results (never protocol errors), and the
+    usual near-misses of clients (one id instead of a list, numbers as strings) still work."""
+    mcp.request("initialize", {})
+    assert "absolute path" in mcp.tool("add_folder", ok=False, path="")  # used to add the server's cwd
+    assert "absolute path" in mcp.tool("add_folder", ok=False, path="lib")
+    assert "absolute path" in mcp.tool("remove_folder", ok=False, folder="")
+    mcp.tool("add_folder", path=str(library))
+    assert mcp.tool("index", wait_seconds=60)["indexed"] == 7
+    first = mcp.tool("search", query="torii", k=3)["results"][0]["id"]
+
+    assert "unknown argument 'kind'" in mcp.tool("search", ok=False, query="x", kind="video")
+    assert "query: expected string" in mcp.tool("search", ok=False, query=5)  # was a JSON-RPC internal error
+    assert "text_weight: must be between 0 and 1" in mcp.tool("search", ok=False, query="x", like=[first], text_weight=5)
+    assert "k: must be between 1 and 200" in mcp.tool("search", ok=False, query="x", k=0)
+    assert "finite number" in mcp.tool("search", ok=False, query="x", like=[first], text_weight="nan")
+    assert "like[0]: expected integer or string" in mcp.tool("search", ok=False, like=[True])
+    assert "missing required argument image" in mcp.tool("similar", ok=False)
+    assert "reveal: expected boolean" in mcp.tool("open_file", ok=False, image=first, reveal="yes")
+    r = mcp.request("tools/call", {"name": "status", "arguments": [1]})["result"]
+    assert r["isError"] and "arguments must be an object" in r["content"][0]["text"]
+
+    by_list = mcp.tool("search", like=[first], k=3)["results"]
+    assert mcp.tool("search", like=str(first), k=3)["results"] == by_list  # "12" used to mean ["1", "2"]
+    assert mcp.tool("search", like=json.dumps([first]), k="3")["results"] == by_list
+    assert mcp.tool("search", query="x", kinds="jpeg")["results"][0]["kind"] == "jpeg"
+
+    # root: symlinked paths match the stored (resolved) folders; folders outside the library are an error
+    (tmp_path / "link").symlink_to(library)
+    assert mcp.tool("search", query="x", root=str(tmp_path / "link" / "set0"))["count"] == 3
+    assert "not a library folder" in mcp.tool("search", ok=False, query="x", root=str(tmp_path / "elsewhere"))
+
+    # boards: a bad image leaves no half-made board behind; an empty board says so
+    assert "no indexed file" in mcp.tool("board_create", ok=False, name="Bad", images=[first, 999])
+    assert mcp.tool("list_boards")["boards"] == []
+    empty = mcp.tool("board_create", name="Empty")
+    assert "is empty" in mcp.tool("search", ok=False, board=empty["id"])
+    assert "no board" in mcp.tool("web_link", ok=False, board=999)
+
+    sheet = mcp.request("tools/call", {"name": "view_images", "arguments": {"images": [first] * 30}})["result"]
+    assert "first 24 of 30" in json.loads(sheet["content"][1]["text"])["note"]
+    assert mcp.request("ping")["result"] == {}
+
+
+def test_no_index_mode():
+    """`mitsuke mcp --no-index` does not offer the index tool."""
+    p = subprocess.run([sys.executable, "-m", "mitsuke", "mcp", "--no-index"], env={**os.environ, "PYTHONPATH": SRC},
+                       input=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n",
+                       capture_output=True, text=True, timeout=60)
+    names = {t["name"] for t in json.loads(p.stdout)["result"]["tools"]}
+    assert "index" not in names and "search" in names
+
+
+def test_bad_messages_keep_the_session(mcp):
+    """Garbage on stdin gets a JSON-RPC error and the server keeps going (it used to exit on bytes that are not UTF-8)."""
+    mcp.request("initialize", {})
+
+    def raw(data: bytes):
+        mcp.p.stdin.flush()
+        mcp.p.stdin.buffer.write(data + b"\n")
+        mcp.p.stdin.buffer.flush()
+        return json.loads(mcp.p.stdout.readline())
+
+    assert raw(b"\xff\xfe{}")["error"]["code"] == -32700
+    assert raw(b"[]")["error"]["code"] == -32600
+    bad = raw(b'{"jsonrpc": "1.0", "id": 41, "method": "ping"}')
+    assert bad["error"]["code"] == -32600 and bad["id"] == 41
+    params = raw(b'{"jsonrpc": "2.0", "id": 42, "method": "tools/call", "params": [1, 2]}')
+    assert params["error"]["code"] == -32602 and params["id"] == 42
+    assert mcp.request("ping")["result"] == {}
 
 
 def test_no_voice_tool(mcp):

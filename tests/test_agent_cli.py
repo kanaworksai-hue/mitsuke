@@ -85,6 +85,14 @@ def test_web_links(indexed, capsys, monkeypatch):
 
     code, out = run(capsys, "web", "torii")
     assert code == 0 and out["running"] is False and out["url"] is None
+    # links to things that are not there are errors, not broken pages
+    for args, msg in ((["--board", "2"], "no board #2"), (["--like", "#999"], "no indexed file #999"),
+                      (["--like", str(indexed / "notes.txt")], "not in the library"),
+                      (["x", "--like", "#3", "--text-weight", "7"], "--text-weight"), (["--kind", "foo"], "unknown kind")):
+        code, err = run(capsys, "web", *args)
+        assert code == 1 and msg in err["error"], args
+    run(capsys, "board", "create", "One")
+    run(capsys, "board", "create", "Two")
     monkeypatch.setenv("MITSUKE_NO_DESKTOP", "1")
     srv = Server(port=0, index=False, warm=False).start()
     try:
@@ -161,3 +169,98 @@ def test_search_reports_pending(library, capsys):
     assert res["pending"] == 0 and "note" not in res
     _, res = run(capsys, "similar", str(library / "photo.jpg"))
     assert res["pending"] == 0
+
+
+def test_no_desktop_blocks_open(indexed, capsys, monkeypatch):
+    """`--open` / `--reveal` honour MITSUKE_NO_DESKTOP=1 like the web app and MCP (no apps popping up in tests)."""
+    import mitsuke.cli as cli
+
+    calls = []
+    monkeypatch.setattr(cli.sys, "platform", "darwin")
+    monkeypatch.setattr(cli.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.setenv("MITSUKE_NO_DESKTOP", "1")
+    assert main(["search", "torii", "--open"]) == 0
+    assert main(["similar", str(indexed / "photo.jpg"), "--open"]) == 0
+    assert main(["show", str(indexed / "photo.jpg"), "--open"]) == 0
+    assert main(["show", str(indexed / "photo.jpg"), "--reveal"]) == 0
+    assert calls == []
+    monkeypatch.delenv("MITSUKE_NO_DESKTOP")
+    assert main(["show", str(indexed / "photo.jpg"), "--reveal"]) == 0
+    assert calls == [["open", "-R", str(indexed / "photo.jpg")]]
+
+
+def test_filters_that_would_find_nothing(indexed, capsys, tmp_path):
+    """--root through a symlink (e.g. /tmp → /private/tmp, a cloud-drive link) finds the files; -k 0 and a --root
+    outside the library are errors instead of silently empty results."""
+    link = tmp_path / "link"
+    link.symlink_to(indexed, target_is_directory=True)
+    code, out = run(capsys, "search", "torii", "--root", str(link / "set0"), "-k", "50")
+    assert code == 0 and len(out["results"]) == 3 and all("/set0/" in h["path"] for h in out["results"])
+    code, out = run(capsys, "similar", str(indexed / "photo.jpg"), "--root", str(link), "-k", "50")
+    assert code == 0 and len(out["results"]) == 6
+    code, out = run(capsys, "search", "torii", "--root", str(tmp_path), "-k", "50")  # a folder holding the library
+    assert code == 0 and len(out["results"]) == 7
+    from mitsuke.search import search_text
+    from mitsuke.model import get_embedder
+    from mitsuke.store import Store
+
+    assert len(search_text(Store(), get_embedder(), "torii", root=str(link / "set1"))) == 3
+    code, err = run(capsys, "search", "torii", "--root", str(tmp_path / "elsewhere"))
+    assert code == 1 and "not a library folder" in err["error"]
+    for k in ("0", "-2"):
+        code, err = run(capsys, "search", "torii", "-k", k)
+        assert code == 1 and "-k must be at least 1" in err["error"]
+
+
+def test_similar_refs_and_bad_images(indexed, capsys):
+    """`similar` takes the same image references as `search --like`; unreadable images are errors, not tracebacks."""
+    _, by_path = run(capsys, "similar", str(indexed / "photo.jpg"), "-k", "3")
+    _, info = run(capsys, "show", str(indexed / "photo.jpg"))
+    for ref in (str(info["id"]), f"#{info['id']}", f"f{info['id']}"):
+        code, out = run(capsys, "similar", ref, "-k", "3")
+        assert code == 0 and out["results"] == by_path["results"] and out["image"] == info["path"] and out["in_library"]
+    (indexed / "notes.png").write_text("not an image " * 50)
+    main(["index"])
+    capsys.readouterr()
+    _, bad = run(capsys, "show", str(indexed / "notes.png"))
+    assert bad["status"] == "error" and "UnidentifiedImageError" in bad["error"] and bad["thumb"] is None
+    for ref, msg in ((str(bad["id"]), f"not in the index (yet): {bad['id']}"), (str(indexed / "notes.png"), "cannot read this image"),
+                     (str(indexed), "cannot read this image"), ("s99", "no video shot"), ("#999", "no indexed file")):
+        code, err = run(capsys, "similar", ref)
+        assert code == 1 and msg in err["error"], (ref, err)
+    code, err = run(capsys, "search", "--board", "999")  # used to be a traceback
+    assert code == 1 and "no board #999" in err["error"]
+
+
+def test_board_edge_cases(indexed, capsys):
+    code, err = run(capsys, "board", "create", "Bad", "--add", "#999")
+    assert code == 1 and "no indexed file #999" in err["error"]
+    assert run(capsys, "board", "list")[1]["boards"] == []  # nothing half-created
+    (indexed / "notes.png").write_text("not an image " * 50)
+    main(["index"])
+    capsys.readouterr()
+    code, b = run(capsys, "board", "create", "Mixed", "--add", str(indexed / "photo.jpg"), "--add", str(indexed / "notes.png"))
+    assert code == 0 and len(b["results"]) == 2
+    # the item that failed to index is skipped instead of failing the whole board search
+    code, out = run(capsys, "search", "--board", str(b["id"]), "-k", "3")
+    assert code == 0 and len(out["results"]) == 3
+    _, empty = run(capsys, "board", "create", "Empty")
+    code, err = run(capsys, "search", "--board", str(empty["id"]))
+    assert code == 1 and "has no indexed images" in err["error"]
+    code, out = run(capsys, "search", "torii", "--board", str(empty["id"]), "-k", "2")
+    assert code == 0 and len(out["results"]) == 2
+    code, err = run(capsys, "board", "rename", str(empty["id"]), " ")
+    assert code == 1 and "new name" in err["error"]
+
+
+def test_serve_when_already_running(indexed, capsys, monkeypatch):
+    """A second `mitsuke serve` on the same index points to the running one instead of starting another."""
+    from mitsuke.server import Server
+
+    monkeypatch.setenv("MITSUKE_NO_DESKTOP", "1")
+    srv = Server(port=0, index=False, warm=False).start()
+    try:
+        code, out = run(capsys, "serve", "--port", "0", "--open")
+        assert code == 0 and out == {"event": "already_running", "url": srv.url}
+    finally:
+        srv.stop()

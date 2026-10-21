@@ -78,9 +78,17 @@ def cmd_add(a, out: Out):
     from . import library
 
     store = _store()
+    for f in a.folders:  # a typo in the second folder should not leave the first one half-reported
+        if not os.path.isdir(_abs(f)):
+            raise CliError(f"not a folder: {f}")
     added = []
     for f in a.folders:
-        r = _lib_call(library.add_folder, store, f)
+        try:
+            r = _lib_call(library.add_folder, store, f)
+        except CliError as e:
+            if not added:
+                raise
+            raise CliError(f"{e} (added before this error: {', '.join(r['path'] for r in added)})") from None
         p, new = r["path"], r["new"]
         added.append(r)
         out.say(f"{'added' if new else 'already added'}: {p}")
@@ -95,7 +103,7 @@ def cmd_remove(a, out: Out):
     removed = []
     for f in a.folders:
         p = _abs(f)
-        match = [r for r in store.roots() if r["path"] == p or str(r["id"]) == f.lstrip("#")]
+        match = [r for r in store.roots() if paths.nfc(r["path"]) == paths.nfc(p) or str(r["id"]) == f.lstrip("#")]
         if not match:
             raise CliError(f"not a library folder: {f} (see `mitsuke roots`)")
         n = store.remove_root(match[0]["id"])
@@ -152,6 +160,8 @@ def _raise_interrupt(*_):
 def cmd_index(a, out: Out):
     from . import indexer
 
+    if a.limit is not None and a.limit < 1:  # 0 used to mean "no limit"
+        raise CliError("--limit must be at least 1")
     lock = _lock()  # noqa: F841 — held for the life of the process
     # Stop cleanly on Ctrl-C and on `kill` (agents run `index --watch` in the background), even if the parent
     # shell started us with SIGINT ignored.
@@ -206,17 +216,21 @@ def cmd_index(a, out: Out):
 
     if a.retry_errors:
         n = indexer.retry_errors(store)
+        if out.json:
+            out.emit({"event": "retry", "files": n})
         out.say(f"retrying {n} files that failed before")
     try:
         one_pass()
         if a.watch:
             from . import watch
 
-            roots = {r["id"]: r["path"] for r in store.roots() if os.path.isdir(r["path"])}
+            roots = {r["id"]: r["path"] for r in store.roots()}  # offline ones are picked up when they are back
+            online = [p for p in roots.values() if os.path.isdir(p)]
             if out.json:
-                out.emit({"event": "watching", "roots": list(roots.values())})
+                out.emit({"event": "watching", "roots": online, "offline": [p for p in roots.values() if p not in online]})
             else:
-                out.say(f"watching {len(roots)} folders for changes (Ctrl-C to stop)")
+                out.say(f"watching {len(online)} folders for changes (Ctrl-C to stop)"
+                        + (f"; {len(roots) - len(online)} offline, indexed when they are back" if len(online) < len(roots) else ""))
             watch.run(store, roots, lambda dirty: one_pass(dirty, quiet=True))
         elif out.json:
             out.emit({"event": "done", "pending": indexer.pending_count(store)})
@@ -226,7 +240,8 @@ def cmd_index(a, out: Out):
         if out.json:
             out.emit({"event": "interrupted", "pending": left})
         else:
-            out.say(f"stopped. {left} images still to index — run `mitsuke index` again to continue.")
+            out.say(f"stopped. {left} images still to index — run `mitsuke index` again to continue." if left
+                    else "stopped. Everything is indexed.")
         return EXIT_INTERRUPTED
 
 
@@ -234,11 +249,15 @@ def _print_hits(out: Out, store, hits, header: dict):
     from .library import index_note
 
     note = index_note(store)
+    hint = None
+    if not hits and not store.db.execute("SELECT 1 FROM files WHERE status='ok' LIMIT 1").fetchone():
+        hint = ("the library is empty: add folders with `mitsuke add <folder>`, then run `mitsuke index`"
+                if not store.roots() else "nothing is indexed yet: run `mitsuke index` (progress: `mitsuke status`)")
     if out.json:
-        out.emit({**header, **note, "results": hits})
+        out.emit({**header, **note, "results": hits, **({"hint": hint} if hint else {})})
         return
     if not hits:
-        out.say("no results (is anything indexed? `mitsuke status`)")
+        out.say(hint or "no results")
     for i, h in enumerate(hits, 1):
         at = f"  @ {_fmt_time(h['time'])}" if "time" in h else ""
         out.say(f"{i:>3}. {h['score']:.3f}  {h['path']}{at}")
@@ -251,9 +270,11 @@ def _fmt_time(t: float) -> str:
     return f"{t // 3600}:{t % 3600 // 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60}:{t % 60:02d}"
 
 
-def _open(path: str):
-    if sys.platform == "darwin":
-        subprocess.run(["open", path], check=False)
+def _open(*args: str):
+    """macOS `open` (a file, a URL, or `-R` to reveal in Finder). MITSUKE_NO_DESKTOP=1 turns it off, as in the
+    web app and the MCP server (tests, demos, agents running headless)."""
+    if sys.platform == "darwin" and os.environ.get("MITSUKE_NO_DESKTOP") != "1":
+        subprocess.run(["open", *args], check=False)
 
 
 def _kinds(a):
@@ -266,12 +287,29 @@ def _kinds(a):
         raise CliError(str(e)) from None
 
 
+def _check_filters(store, a):
+    """Reject filters that would silently find nothing: -k below 1, a --root outside the library. --root becomes
+    the absolute real path (library folders are stored that way; also what the web app link needs)."""
+    if getattr(a, "k", 1) < 1:
+        raise CliError("-k must be at least 1")
+    if getattr(a, "root", None):
+        p = _abs(a.root)
+        n = paths.nfc(p).rstrip("/")
+        if not any((rp := paths.nfc(r["path"])) == n or n.startswith(rp + "/") or rp.startswith(n + "/")
+                   for r in store.roots()):
+            raise CliError(f"--root is not a library folder or inside one: {a.root} (see `mitsuke roots`)")
+        a.root = p
+
+
 def _query_images(store, a):
     from . import library
 
     refs = list(a.like or [])
     if a.board:
-        refs += library.board_refs(store, a.board)
+        board = _lib_call(library.board_refs, store, a.board)
+        if not board and not refs and not " ".join(a.query).strip():
+            raise CliError(f"board #{a.board} has no indexed images to search by")
+        refs += board
     return refs
 
 
@@ -288,16 +326,8 @@ def _web_link(text="", refs=(), a=None, board_id=None, show_board=None):
                            root=getattr(a, "root", None))
 
 
-def _run_search(store, a, out: Out, text: str, header: dict):
-    """Text, images (--like / --board) or both, fused by --text-weight."""
-    from . import library
-    from .search import combined
-
-    refs = _query_images(store, a)
-    if not text and not refs:
-        raise CliError("give a description, --like <image> or --board <id>")
-    if a.text_weight is not None and not 0 <= a.text_weight <= 1:
-        raise CliError("--text-weight must be between 0 and 1")
+def _lazy_embedder():
+    """→ a function returning the embedder, loaded on first use (library files need no model)."""
     lazy = {}
 
     def emb():
@@ -307,10 +337,29 @@ def _run_search(store, a, out: Out, text: str, header: dict):
             lazy["e"] = get_embedder()
         return lazy["e"]
 
-    try:
-        vecs, ex_files, ex_shots = library.query_vectors(store, model_id(), refs, lambda ims: emb().embed_images(ims, tokens=_tokens(store, None)))
-    except (library.NotFound, library.BadRequest) as e:
-        raise CliError(str(e)) from None
+    return emb
+
+
+def _query_vectors(store, refs, emb):
+    from . import library
+
+    return _lib_call(library.query_vectors, store, model_id(), refs,
+                     lambda ims: emb().embed_images(ims, tokens=_tokens(store, None)))
+
+
+def _run_search(store, a, out: Out, text: str, header: dict):
+    """Text, images (--like / --board) or both, fused by --text-weight."""
+    from . import library
+    from .search import combined
+
+    _check_filters(store, a)
+    refs = _query_images(store, a)
+    if not text and not refs:
+        raise CliError("give a description, --like <image> or --board <id>")
+    if a.text_weight is not None and not 0 <= a.text_weight <= 1:
+        raise CliError("--text-weight must be between 0 and 1")
+    emb = _lazy_embedder()
+    vecs, ex_files, ex_shots = _query_vectors(store, refs, emb)
     tv = emb().embed_texts([text])[0] if text else None
     w = 0.5 if a.text_weight is None else a.text_weight
     hits = combined(store, model_id(), text_vec=tv, image_vecs=vecs, text_weight=w, k=a.k, root=a.root,
@@ -330,17 +379,24 @@ def cmd_search(a, out: Out):
 
 
 def cmd_similar(a, out: Out):
-    from .model import get_embedder
-    from .search import image_vector, rank
+    """Like `search --like`, for one image: id / #id / f<id>, s<shot>, or a path inside or outside the library."""
+    from . import library
+    from .search import combined
 
     store = _store()
-    try:
-        fid, path, vec = image_vector(store, model_id(), a.image, get_embedder, _tokens(store, None))
-    except FileNotFoundError as e:
-        raise CliError(f"not found: {e}") from None
-    hits = rank(store, model_id(), vec, k=a.k, root=a.root, kinds=_kinds(a), exclude={fid} if fid else None)
+    _check_filters(store, a)
+    ref = _lib_call(library.parse_ref, store, a.image)
+    if "shot" in ref:
+        fid = _lib_call(library.board_item, store, ref)["file"]
+    else:
+        fid = ref.get("file")
+    path = ref.get("path") or (_lib_call(library.item, store, fid)["path"] if fid is not None else None)
+    vecs, ex_files, ex_shots = _query_vectors(store, [a.image], _lazy_embedder())
+    hits = combined(store, model_id(), image_vecs=vecs, k=a.k, root=a.root, kinds=_kinds(a), exclude=ex_files,
+                    exclude_shots=ex_shots)
     _print_hits(out, store, hits, {"image": path, "in_library": fid is not None,
-                            "web": _web_link(refs=[{"file": fid}] if fid else [], a=a)})
+                                   **({"shot": ref["shot"]} if "shot" in ref else {}),
+                                   "web": _web_link(refs=[ref] if fid is not None else [], a=a)})
     if a.open and hits:
         _open(hits[0]["path"])
 
@@ -379,8 +435,19 @@ def cmd_status(a, out: Out):
 
 
 def cmd_serve(a, out: Out):
+    from . import library
     from .server import Server
 
+    # A second app on the same index would take over serve.json (and drop it when it stops, hiding the first
+    # one from `mitsuke web`), and only one of them can index anyway.
+    if url := library.running_server():
+        if out.json:
+            out.emit({"event": "already_running", "url": url})
+        else:
+            out.say(f"Mitsuke is already running at {url}")
+        if a.open:
+            _open(url)
+        return
     srv = Server(port=a.port, index=not a.no_index).start()
     if out.json:
         out.emit({"event": "listening", "url": srv.url, "indexing": not a.no_index})
@@ -388,8 +455,8 @@ def cmd_serve(a, out: Out):
         out.say(f"Mitsuke is running at {srv.url}  (only this Mac can reach it; Ctrl-C to stop)")
         if srv.indexer is not None:
             out.say("indexing and watching your folders in the background")
-    if a.open and sys.platform == "darwin":
-        subprocess.run(["open", srv.url], check=False)
+    if a.open:
+        _open(srv.url)
     signal.signal(signal.SIGTERM, _raise_interrupt)
     try:
         while True:
@@ -438,9 +505,10 @@ def cmd_board(a, out: Out):
             out.say(f"#{b['id']}  {b['name']}  ({b['count']} items)")
         return
     if act == "create":
+        items = [_lib_call(library.board_item, store, r) for r in a.items or []]  # check them before creating
         b = library.create_board(store, " ".join(a.args))
-        if a.items:
-            _lib_call(library.board_add, store, b["id"], [_lib_call(library.board_item, store, r) for r in a.items])
+        if items:
+            library.board_add(store, b["id"], items)
         return _print_board(out, library.board(store, b["id"]))
     if not a.args or not a.args[0].lstrip("#").isdigit():
         raise CliError(f"usage: mitsuke board {act} <board id> …  (see `mitsuke board list`)")
@@ -454,6 +522,8 @@ def cmd_board(a, out: Out):
         fn = library.board_add if act == "add" else library.board_remove
         return _print_board(out, _lib_call(fn, store, bid, items))
     if act == "rename":
+        if not " ".join(rest).strip():
+            raise CliError("usage: mitsuke board rename <board id> <new name>")
         r = _lib_call(library.rename_board, store, bid, " ".join(rest))
     else:
         r = _lib_call(library.delete_board, store, bid)
@@ -474,8 +544,8 @@ def cmd_show(a, out: Out):
         raise CliError(f"not in the library: {ref['path']}")
     info = _lib_call(library.item, store, ref["file"])
     info["web"] = _web_link(refs=[{"file": info["id"]}])
-    if (a.open or a.reveal) and info["exists"] and sys.platform == "darwin":
-        subprocess.run(["open", "-R", info["path"]] if a.reveal else ["open", info["path"]], check=False)
+    if (a.open or a.reveal) and info["exists"]:
+        _open(*(["-R"] if a.reveal else []), info["path"])
     if out.json:
         out.emit(info)
         return
@@ -483,7 +553,10 @@ def cmd_show(a, out: Out):
     dims = f"{info['width']}×{info['height']}" if info.get("width") else "?"
     out.say(f"  {info['kind']} · {dims}" + (f" · {_fmt_time(info['duration'])}" if info.get("duration") else "")
             + (f" · on boards {', '.join(f'#{b}' for b in info['boards'])}" if info["boards"] else ""))
-    out.say(f"  thumbnail {info['thumb']}")
+    if info["status"] != "ok":
+        out.say(f"  not indexed: {info.get('error') or info['status']}")
+    if info["thumb"]:
+        out.say(f"  thumbnail {info['thumb']}")
 
 
 def start_server(port: int | None = None, timeout: float = 60) -> str:
@@ -509,14 +582,23 @@ def cmd_web(a, out: Out):
     from . import library
 
     store = _store()
+    _check_filters(store, a)
+    _kinds(a)
+    if not 0 <= a.text_weight <= 1:
+        raise CliError("--text-weight must be between 0 and 1")
+    # check everything before starting the app: a link to a missing board / image opens a broken page
+    if a.board:
+        _lib_call(library.board_refs, store, a.board)
+    for r in a.like or []:
+        _lib_call(library.board_item, store, r)  # the page can only use indexed library images
+    refs = [_lib_call(library.parse_ref, store, r) for r in a.like or []]
     base = start_server(a.port) if a.start else library.running_server()
     text = " ".join(a.query).strip()
-    refs = [_lib_call(library.parse_ref, store, r) for r in a.like or []]
     url = library.web_url(base, text, refs, board_id=a.board if text or refs else None,
                           show_board=None if text or refs else a.board, text_weight=a.text_weight, kinds=_kinds(a),
                           root=a.root) if base else None
-    if url and a.open and sys.platform == "darwin":
-        subprocess.run(["open", url], check=False)
+    if url and a.open:
+        _open(url)
     if out.json:
         out.emit({"running": bool(base), "url": url, **({} if base else {"hint": "mitsuke web --start"})})
     else:
@@ -530,7 +612,11 @@ def cmd_skill(a, out: Out):
     import shutil
 
     if a.action == "show":
-        print(open(os.path.join(SKILL_DIR, "SKILL.md"), encoding="utf-8").read(), end="")
+        text = open(os.path.join(SKILL_DIR, "SKILL.md"), encoding="utf-8").read()
+        if out.json:
+            out.emit({"path": os.path.join(SKILL_DIR, "SKILL.md"), "text": text})
+        else:
+            print(text, end="")
         return
     dest = os.path.join(_abs(a.dir or "~/.claude/skills"), "mitsuke")
     if a.action == "path":
@@ -569,16 +655,26 @@ def cmd_doctor(a, out: Out):
 # --- parser ----------------------------------------------------------------------------------
 
 class _Parser(argparse.ArgumentParser):
+    json_errors = False  # set by main() when --json is anywhere on the command line
+
     def __init__(self, *a, **kw):
         kw.setdefault("allow_abbrev", False)  # `--k` must not silently mean `--kind`
         super().__init__(*a, **kw)
+
+    def error(self, message):
+        """With --json, usage errors are JSON on stdout too (exit code 2, as argparse)."""
+        if _Parser.json_errors:
+            print(json.dumps({"error": f"{self.prog}: {message}", "usage": " ".join(self.format_usage().split())},
+                             ensure_ascii=False), flush=True)
+            sys.exit(2)
+        super().error(message)
 
 
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     # SUPPRESS on the sub-command copy so `mitsuke --json search …` and `mitsuke search … --json` both work
     common.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="machine-readable output (for agents and scripts)")
-    p = argparse.ArgumentParser(prog="mitsuke", description="Local AI image search (EmbeddingGemma 2).", allow_abbrev=False)
+    p = _Parser(prog="mitsuke", description="Local AI image search (EmbeddingGemma 2).")
     p.add_argument("--json", action="store_true", help="machine-readable output (for agents and scripts)")
     p.add_argument("--version", action="version", version=f"mitsuke {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="command", parser_class=_Parser)
@@ -667,6 +763,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    _Parser.json_errors = "--json" in argv
     a = build_parser().parse_args(argv)
     out = Out(a.json)
     try:

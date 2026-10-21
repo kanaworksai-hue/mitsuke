@@ -20,6 +20,11 @@ def test_collector_debounce(tmp_path):
     assert c.take() == {2} and c.take() == set()
     c.note(str(tmp_path / "a" / "newdir"), is_dir=True)
     assert c.dirty == {1}
+    import unicodedata
+
+    c = watch.ChangeCollector({1: unicodedata.normalize("NFC", str(tmp_path / "ガ"))}, debounce=0)
+    c.note(unicodedata.normalize("NFD", str(tmp_path / "ガ" / "x.png")))  # FSEvents may report decomposed names
+    assert c.dirty == {1}
 
 
 def test_fsevents_end_to_end(tmp_path):
@@ -39,3 +44,35 @@ def test_fsevents_end_to_end(tmp_path):
     t.join(timeout=15)
     stop.set()
     assert seen and seen[0] == {1}
+
+
+def _wait_for(cond, timeout=5.0):
+    t = time.monotonic()
+    while not cond() and time.monotonic() - t < timeout:
+        time.sleep(0.1)
+    return cond()
+
+
+def test_root_that_comes_back_is_watched_again(tmp_path):
+    """An unplugged drive (offline at start) or a root renamed away and back: rescanned and watched once it is back."""
+    pytest.importorskip("watchdog")
+    root, away = tmp_path / "drive", tmp_path / "drive_away"
+    seen, stop = [], threading.Event()
+    t = threading.Thread(target=watch.run, args=(None, {1: os.path.realpath(tmp_path) + "/drive"}, seen.append),
+                         kwargs={"debounce": 0.2, "stop": stop, "recheck": 0.2})
+    t.start()
+    try:
+        time.sleep(0.5)
+        assert seen == []
+        root.mkdir()  # the drive is plugged in
+        assert _wait_for(lambda: seen == [{1}])
+        root.rename(away)
+        time.sleep(0.6)
+        away.rename(root)
+        time.sleep(1.0)
+        seen.clear()
+        make_image(root / "after.png")  # a change after it came back still gets noticed
+        assert _wait_for(lambda: {1} in seen)
+    finally:
+        stop.set()
+        t.join(timeout=10)

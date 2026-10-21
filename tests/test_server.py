@@ -121,3 +121,41 @@ def test_upload(server, library):
     assert res[0]["name"] == "photo.jpg"  # the same picture finds itself
     call(server, "POST", "/api/upload", raw=b"not an image", headers={"X-Filename": "x.png"}, expect=415)
     call(server, "POST", "/api/search", {"images": [{"upload": "missing"}]}, expect=404)
+
+
+def test_bad_requests_are_400_not_500(server, library, capsys):
+    call(server, "POST", "/api/folders", {"path": str(library)})
+    wait_indexed(server, 7)
+    first = call(server, "POST", "/api/browse", {"k": 1})["results"][0]["id"]
+    bid = call(server, "POST", "/api/boards", {"name": "b"})["id"]
+    call(server, "POST", "/api/search", raw=b"{not json", expect=400)
+    call(server, "POST", "/api/search", raw=b"[1, 2]", expect=400)
+    call(server, "POST", "/api/search", {"text": "x", "k": "abc"}, expect=400)
+    call(server, "GET", "/api/item/99999999999999999999", expect=400)
+    call(server, "POST", f"/api/boards/{bid}/items", {"items": [{"file": "abc"}]}, expect=400)
+    call(server, "POST", f"/api/boards/{bid}/items", {"items": [{"file": 999999}]}, expect=400)  # not in the library
+    assert len(call(server, "POST", f"/api/boards/{bid}/items", {"items": [{"file": first}]})["results"]) == 1
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_dropped_connection_is_not_logged(server, capsys):
+    try:
+        raise ConnectionResetError(54, "Connection reset by peer")
+    except ConnectionResetError:
+        server.httpd.handle_error(None, ("127.0.0.1", 1))
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_shot_by_id(server, tmp_path):
+    from test_media import _write_video
+
+    lib = tmp_path / "vids"
+    _write_video(lib / "clip.mp4", [(200, 30, 30), (30, 200, 30)])
+    call(server, "POST", "/api/folders", {"path": str(lib)})
+    wait_indexed(server, 1)
+    vid = call(server, "POST", "/api/browse", {"k": 1})["results"][0]
+    shots = call(server, "GET", f"/api/item/{vid['id']}")["shots"]
+    s = call(server, "GET", f"/api/shot/{shots[1]['shot']}")
+    assert s["file"] == vid["id"] and s["name"] == "clip.mp4" and s["time"] == shots[1]["time"]
+    assert s["thumb"] == shots[1]["thumb"] and s["thumb"].startswith("/t/")
+    call(server, "GET", "/api/shot/999999", expect=404)

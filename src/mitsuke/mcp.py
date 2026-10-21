@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import os
 import subprocess
 import sys
@@ -23,6 +24,7 @@ import time
 import traceback
 
 from . import __version__, library, thumbs
+from .paths import nfc
 
 PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
 
@@ -43,10 +45,12 @@ _filters = {
 _query = {
     "query": {"type": "string", "description": "what to find, in any language"},
     "like": {"type": "array", "items": _ref, "description": "example images to search by (averaged)"},
-    "board": {"type": "integer", "description": "search by the images on this moodboard"},
+    "board": {"type": "integer", "description": "moodboard id: search by the images on it"},
     "text_weight": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5,
                     "description": "with words and images: 0 = only the images, 1 = only the words"},
 }
+_board = {"type": "integer", "description": "moodboard id (from list_boards)"}
+_items = {"type": "array", "items": _ref, "description": "library file ids, video shots (\"s34\") or paths of indexed files"}
 
 
 def _tool(name, title, description, props=None, required=(), read_only=True, destructive=False):
@@ -64,43 +68,58 @@ TOOLS = [
           {"image": _ref, **_filters}, ["image"]),
     _tool("view_images", "Look at images",
           "One contact-sheet image of up to 24 thumbnails labelled with their ids, to look at results yourself.",
-          {"images": {"type": "array", "items": _ref, "maxItems": 24}}, ["images"]),
+          {"images": {"type": "array", "items": _ref, "maxItems": 24, "description": "ids or paths, up to 24"}}, ["images"]),
     _tool("file_info", "File details", "Path, type, size, thumbnail, video shots and moodboards of one indexed file.",
           {"image": _ref}, ["image"]),
     _tool("open_file", "Open or reveal a file",
           "Open a file in its default app, or reveal it in Finder (only when the user asks).",
-          {"image": _ref, "reveal": {"type": "boolean", "default": False}}, ["image"], read_only=False),
+          {"image": _ref, "reveal": {"type": "boolean", "default": False,
+                                      "description": "true = show it in Finder instead of opening it"}}, ["image"], read_only=False),
     _tool("list_boards", "List moodboards", "Moodboards with item counts."),
-    _tool("board_show", "Show a moodboard", "The items on a moodboard.", {"board": {"type": "integer"}}, ["board"]),
+    _tool("board_show", "Show a moodboard", "The items on a moodboard.", {"board": _board}, ["board"]),
     _tool("board_create", "Create a moodboard", "A new moodboard, optionally with images on it.",
-          {"name": {"type": "string"}, "images": {"type": "array", "items": _ref}}, ["name"], read_only=False),
+          {"name": {"type": "string", "description": "name of the moodboard"}, "images": _items}, ["name"], read_only=False),
     _tool("board_add", "Add to a moodboard", "Put library images or video shots on a moodboard.",
-          {"board": {"type": "integer"}, "images": {"type": "array", "items": _ref}}, ["board", "images"], read_only=False),
+          {"board": _board, "images": _items}, ["board", "images"], read_only=False),
     _tool("board_remove", "Remove from a moodboard", "Take images off a moodboard (files are untouched).",
-          {"board": {"type": "integer"}, "images": {"type": "array", "items": _ref}}, ["board", "images"], read_only=False),
-    _tool("board_rename", "Rename a moodboard", "", {"board": {"type": "integer"}, "name": {"type": "string"}},
+          {"board": _board, "images": _items}, ["board", "images"], read_only=False),
+    _tool("board_rename", "Rename a moodboard", "Give a moodboard a new name.",
+          {"board": _board, "name": {"type": "string", "description": "the new name"}},
           ["board", "name"], read_only=False),
     _tool("board_delete", "Delete a moodboard", "Delete a moodboard (the images are untouched).",
-          {"board": {"type": "integer"}}, ["board"], read_only=False, destructive=True),
+          {"board": _board}, ["board"], read_only=False, destructive=True),
     _tool("status", "Library status", "Folders, what is indexed / pending / failed, and whether indexing is running."),
     _tool("add_folder", "Add a folder", "Add a folder to the library (then call `index`).",
-          {"path": {"type": "string"}}, ["path"], read_only=False),
+          {"path": {"type": "string", "description": "absolute path of the folder (~ allowed)"}}, ["path"], read_only=False),
     _tool("remove_folder", "Remove a folder", "Remove a folder from the library (the files are untouched).",
-          {"folder": {"oneOf": [{"type": "integer"}, {"type": "string"}], "description": "folder id or path"}},
+          {"folder": {"oneOf": [{"type": "integer"}, {"type": "string"}], "description": "folder id or absolute path (see status)"}},
           ["folder"], read_only=False, destructive=True),
     _tool("index", "Index the library",
           "Index new and changed files in the background. Waits up to `wait_seconds` and returns progress; call "
           "`status` later for the rest. Safe to call again.",
-          {"wait_seconds": {"type": "number", "minimum": 0, "maximum": 600, "default": 60}}, read_only=False),
+          {"wait_seconds": {"type": "number", "minimum": 0, "maximum": 600, "default": 60,
+                            "description": "how long to wait for progress before returning (indexing goes on)"}}, read_only=False),
     _tool("web_link", "Link to the web app",
           "A link that opens Mitsuke's local web page on a search or a moodboard (for the user). With start=true the "
           "page is started in the background if it is not running.",
-          {**{k: v for k, v in _query.items()}, "start": {"type": "boolean", "default": False}}, read_only=False),
+          {**{k: v for k, v in _query.items()}, "start": {"type": "boolean", "default": False,
+                                                        "description": "start the web app if it is not running"}}, read_only=False),
 ]
+
+
+MAX_SHEET = 24  # thumbnails on one contact sheet
 
 
 class ToolError(Exception):
     pass
+
+
+def _abs_path(path, what: str) -> str:
+    """Paths from an agent must be absolute: the server's working directory means nothing to it."""
+    p = str(path).strip()
+    if not (os.path.isabs(p) or p.startswith("~")):
+        raise ToolError(f"{what} must be an absolute path (or start with ~), got {path!r}")
+    return os.path.expanduser(p)
 
 
 class Mitsuke:
@@ -136,13 +155,21 @@ class Mitsuke:
         from .search import check_kinds, combined
 
         check_kinds(kinds)
-
+        root = self._root(root) if root else None
         vecs, ex_files, ex_shots = library.query_vectors(
             self.store, self.model, refs, lambda ims: self.engine.embed_images(ims, tokens=self.tokens()))
         tv = self.engine.embed_texts([text])[0] if text else None
         return combined(self.store, self.model, text_vec=tv, image_vecs=vecs, text_weight=text_weight,
-                        k=max(1, min(int(k), 200)), root=root or None, kinds=kinds or None,
+                        k=max(1, min(int(k), 200)), root=root, kinds=kinds or None,
                         exclude=ex_files, exclude_shots=ex_shots)
+
+    def _root(self, root: str) -> str:
+        """A `root` filter as the library stores folders (symlinks resolved: /tmp, /var … on macOS)."""
+        p = os.path.realpath(_abs_path(root, "root"))
+        if not any(p == r["path"] or p.startswith(r["path"] + "/") or r["path"].startswith(p + "/")
+                   for r in self.store.roots()):
+            raise ToolError(f"not a library folder or inside one: {root} (status lists the folders)")
+        return p
 
     def _empty_hint(self):
         n = self.store.db.execute("SELECT COUNT(*) FROM files WHERE status='ok'").fetchone()[0]
@@ -178,7 +205,10 @@ class Mitsuke:
         text = (query or "").strip()
         refs = list(like or [])
         if board:
-            refs += library.board_refs(self.store, int(board))
+            on_board = library.board_refs(self.store, int(board))
+            if not on_board and not text and not refs:
+                raise ToolError(f"moodboard #{board} is empty: put images on it with board_add first")
+            refs += on_board
         if not text and not refs:
             raise ToolError("give a query, example images (like) or a board")
         hits = self._hits(text, refs, float(text_weight), k, root, kinds)
@@ -190,7 +220,7 @@ class Mitsuke:
 
     def view_images(self, images):
         cells = []
-        for ref in images[:24]:
+        for ref in images[:MAX_SHEET]:
             r = library.parse_ref(self.store, ref)
             if r.get("path") and r.get("file") is None:  # any image on disk, not only the library
                 cells.append((os.path.basename(r["path"]), r["path"]))
@@ -204,7 +234,10 @@ class Mitsuke:
                 cells.append((f"#{f['id']}", thumbs.thumb_path(f["sha1"]) if f["sha1"] else None))
         if not cells:
             raise ToolError("no images given")
-        return _ImageResult(contact_sheet(cells), {"images": [c[0] for c in cells]})
+        meta = {"images": [c[0] for c in cells]}
+        if len(images) > MAX_SHEET:
+            meta["note"] = f"only the first {MAX_SHEET} of {len(images)} are shown; call again for the rest"
+        return _ImageResult(contact_sheet(cells), meta)
 
     def file_info(self, image):
         info = library.item(self.store, self._file_id(image))
@@ -227,9 +260,10 @@ class Mitsuke:
         return {**b, "web": self._web(show_board=b["id"])}
 
     def board_create(self, name, images=None):
+        items = [library.board_item(self.store, r) for r in images or []]
         b = library.create_board(self.store, name)
-        if images:
-            library.board_add(self.store, b["id"], [library.board_item(self.store, r) for r in images])
+        if items:
+            library.board_add(self.store, b["id"], items)
         return self.board_show(b["id"])
 
     def board_add(self, board, images):
@@ -261,12 +295,12 @@ class Mitsuke:
                 "indexing": self.job_state, "web": library.running_server()}
 
     def add_folder(self, path):
-        return {**library.add_folder(self.store, path), "next": "call index to index it"}
+        return {**library.add_folder(self.store, _abs_path(path, "path")), "next": "call index to index it"}
 
     def remove_folder(self, folder):
         s = str(folder).lstrip("#")
-        p = os.path.realpath(os.path.abspath(os.path.expanduser(s)))
-        match = [r for r in self.store.roots() if r["path"] == p or str(r["id"]) == s]
+        p = s if s.isdigit() else os.path.realpath(_abs_path(s, "folder"))
+        match = [r for r in self.store.roots() if nfc(r["path"]) == nfc(p) or str(r["id"]) == s]
         if not match:
             raise ToolError(f"not a library folder: {folder} (see status)")
         return {"removed": match[0]["path"], "files": self.store.remove_root(match[0]["id"])}
@@ -285,7 +319,8 @@ class Mitsuke:
             self.job.join(0.25)
         st = self.status()
         return {"indexing": st["indexing"], "indexed": st["indexed"], "pending": st["pending"], "errors": st["errors"],
-                "done": not self.job.is_alive()}
+                # another indexer holds the lock: our pass ended, but the indexing is not done
+                "done": not self.job.is_alive() and self.job_state.get("state") != "external"}
 
     def _index_pass(self):
         from .server import Indexer
@@ -308,14 +343,16 @@ class Mitsuke:
         m.start()
         try:
             ix._pass(store)
-            self.job_state = {**ix.state, "state": "done"}
+            final = {**ix.state, "state": "done"}
         except Exception as e:  # noqa: BLE001
             traceback.print_exc()
-            self.job_state = {"state": "error", "message": f"{type(e).__name__}: {e}"[:300]}
+            final = {"state": "error", "message": f"{type(e).__name__}: {e}"[:300]}
         finally:
             stop.set()
+            m.join()
             store.close()
             ix.lockf.close()  # releases the lock
+        self.job_state = final
 
     def web_link(self, query="", like=None, board=None, text_weight=0.5, start=False):
         from .cli import CliError, start_server
@@ -326,6 +363,8 @@ class Mitsuke:
             except CliError as e:
                 raise ToolError(str(e)) from None
         text = (query or "").strip()
+        if board:
+            library.board_refs(self.store, int(board))  # raises NotFound
         url = self._web(text, like, board if (text or like) else None, None if (text or like) else board, float(text_weight))
         if url is None:
             return {"running": False, "url": None, "hint": "call web_link with start=true (or run `mitsuke serve`)"}
@@ -376,12 +415,95 @@ def _clean(obj):
     return json.loads(json.dumps(obj, ensure_ascii=False, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
 
 
+def _as_type(t: str, v, lenient: bool):
+    """(True, value) if `v` is of JSON Schema type `t`; with `lenient`, also what clients commonly send instead
+    (numbers and booleans as strings, a list as JSON text or a single item)."""
+    if t == "string":
+        return isinstance(v, str), v
+    if t == "boolean":
+        if isinstance(v, bool):
+            return True, v
+        if lenient and isinstance(v, str) and v.lower() in ("true", "false"):
+            return True, v.lower() == "true"
+    elif t in ("integer", "number") and not isinstance(v, bool):
+        if isinstance(v, int) or (t == "number" and isinstance(v, float)):
+            return True, v
+        if isinstance(v, float) and v.is_integer():
+            return True, int(v)
+        if lenient and isinstance(v, str):
+            try:
+                n = float(v)
+            except ValueError:
+                return False, v
+            if t == "number":
+                return True, n
+            if n.is_integer():
+                return True, int(n)
+    elif t == "array":
+        if isinstance(v, list):
+            return True, v
+        if lenient and isinstance(v, str) and v.lstrip().startswith("["):
+            try:
+                return isinstance(json.loads(v), list), json.loads(v)
+            except ValueError:
+                return False, v
+        if lenient and isinstance(v, (str, int)) and not isinstance(v, bool):
+            return True, [v]
+    elif t == "object":
+        return isinstance(v, dict), v
+    return False, v
+
+
+def _check_value(name: str, v, schema: dict):
+    options = schema.get("oneOf") or schema.get("anyOf") or [schema]
+    for lenient in (False, True):  # exact types first, so "12" stays a string where strings are allowed
+        for o in options:
+            ok, val = _as_type(o["type"], v, lenient)
+            if ok:
+                break
+        if ok:
+            break
+    else:
+        types = " or ".join(o["type"] for o in options)
+        raise ToolError(f"{name}: expected {types}, got {json.dumps(v, ensure_ascii=False)[:80]}")
+    if isinstance(val, float) and not math.isfinite(val):  # NaN would slip through the range check
+        raise ToolError(f"{name}: expected a finite number, got {v}")
+    if o["type"] == "array" and "items" in o:
+        val = [_check_value(f"{name}[{i}]", x, o["items"]) for i, x in enumerate(val)]
+    if "minimum" in o and val < o["minimum"] or "maximum" in o and val > o["maximum"]:
+        raise ToolError(f"{name}: must be between {o.get('minimum', '-inf')} and {o.get('maximum', 'inf')}, got {val}")
+    return val
+
+
+def check_args(tool: dict, args) -> dict:
+    """Arguments against the tool's input schema → clean keyword arguments, or a ToolError an agent can act on."""
+    if args is None:
+        args = {}
+    if not isinstance(args, dict):
+        raise ToolError("arguments must be an object")
+    schema = tool["inputSchema"]
+    props = schema["properties"]
+    out = {}
+    for k, v in args.items():
+        if k not in props:
+            raise ToolError(f"unknown argument {k!r}; {tool['name']} takes: {', '.join(props) or 'no arguments'}")
+        if v is not None:  # null = not given
+            out[k] = _check_value(k, v, props[k])
+    missing = [k for k in schema.get("required", []) if k not in out]
+    if missing:
+        raise ToolError(f"missing required argument {', '.join(missing)}")
+    return out
+
+
 class Server:
     def __init__(self, out, index: bool = True):
         self.out = out
         self.write_lock = threading.Lock()
         self.app = None
         self.index = index
+
+    def tools(self) -> list[dict]:
+        return TOOLS if self.index else [t for t in TOOLS if t["name"] != "index"]
 
     def send(self, msg):
         with self.write_lock:
@@ -391,16 +513,20 @@ class Server:
     def call_tool(self, name, args):
         import base64
 
-        if name not in {t["name"] for t in TOOLS}:
+        tool = next((t for t in self.tools() if t["name"] == name), None)
+        if tool is None:
             return {"content": [{"type": "text", "text": f"unknown tool: {name}"}], "isError": True}
-        if self.app is None:
-            self.app = Mitsuke(index=self.index)
+        # Every failure is a tool result with isError (the agent reads it and can correct itself), never a protocol error.
         try:
-            res = getattr(self.app, name)(**(args or {}))
-        except TypeError as e:
-            return {"content": [{"type": "text", "text": f"bad arguments: {e}"}], "isError": True}
+            args = check_args(tool, args)
+            if self.app is None:
+                self.app = Mitsuke(index=self.index)
+            res = getattr(self.app, name)(**args)
         except (ToolError, library.NotFound, library.BadRequest, ValueError) as e:
             return {"content": [{"type": "text", "text": str(e)}], "isError": True}
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc()
+            return {"content": [{"type": "text", "text": f"internal error: {type(e).__name__}: {e}"}], "isError": True}
         if isinstance(res, _ImageResult):
             return {"content": [{"type": "image", "data": base64.b64encode(res.jpeg).decode(), "mimeType": "image/jpeg"},
                                 {"type": "text", "text": json.dumps(res.meta, ensure_ascii=False)}]}
@@ -411,10 +537,13 @@ class Server:
         if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or "method" not in msg:
             if isinstance(msg, dict) and "id" in msg and "method" not in msg:
                 return None  # a response to something we never ask; ignore
-            return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "invalid request"}}
+            mid = msg.get("id") if isinstance(msg, dict) else None
+            return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32600, "message": "invalid request"}}
         mid, method, params = msg.get("id"), msg["method"], msg.get("params") or {}
         if "id" not in msg:  # notification
             return None
+        if not isinstance(params, dict):
+            return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": "params must be an object"}}
         try:
             if method == "initialize":
                 want = params.get("protocolVersion")
@@ -427,7 +556,7 @@ class Server:
             elif method == "ping":
                 result = {}
             elif method == "tools/list":
-                result = {"tools": TOOLS}
+                result = {"tools": self.tools()}
             elif method == "tools/call":
                 result = self.call_tool(params.get("name"), params.get("arguments"))
             elif method in ("resources/list", "prompts/list", "resources/templates/list"):
@@ -449,7 +578,9 @@ class Server:
             except json.JSONDecodeError:
                 self.send({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}})
                 continue
-            if isinstance(msg, list):  # batch (protocol 2025-03-26)
+            if msg == []:  # an empty batch is an invalid request (JSON-RPC 2.0)
+                self.send({"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "invalid request"}})
+            elif isinstance(msg, list):  # batch (protocol 2025-03-26)
                 replies = [r for r in (self.handle(m) for m in msg) if r is not None]
                 if replies:
                     self.send(replies)
@@ -470,7 +601,8 @@ def serve_stdio(index: bool = True) -> int:
         disable_progress_bars()
     except ImportError:
         pass
-    inp = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
+    # Bytes that are not UTF-8 must not end the session: they become U+FFFD and that line gets a parse error reply.
+    inp = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace")
     try:
         return Server(proto, index=index).run(inp)
     except KeyboardInterrupt:

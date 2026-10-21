@@ -20,6 +20,7 @@ import hashlib
 import os
 import sqlite3
 import time
+import unicodedata
 from pathlib import Path
 
 import numpy as np
@@ -93,6 +94,7 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.path, timeout=30, isolation_level=None, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
+        self.db.create_function("nfc", 1, paths.nfc, deterministic=True)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.execute("PRAGMA foreign_keys=ON")
@@ -240,14 +242,16 @@ class Store:
         return out
 
     def find_file(self, abspath: str) -> sqlite3.Row | None:
-        """Look up an absolute path among the roots (longest matching root wins)."""
+        """Look up an absolute path among the roots (longest matching root wins). Unicode normalisation (NFC / NFD)
+        may differ between the path given and the names stored from disk."""
+        p = paths.nfc(abspath)
         for r in sorted(self.roots(), key=lambda r: -len(r["path"])):
-            root = r["path"].rstrip("/") + "/"
-            if abspath.startswith(root):
-                return self.db.execute(
-                    "SELECT f.*, ? AS root FROM files f WHERE root_id=? AND relpath=?",
-                    (r["path"], r["id"], abspath[len(root):]),
-                ).fetchone()
+            root = paths.nfc(r["path"]).rstrip("/") + "/"
+            if p.startswith(root):
+                rel = p[len(root):]
+                q = "SELECT f.*, ? AS root FROM files f WHERE root_id=? AND "
+                return (self.db.execute(q + "relpath IN (?, ?)", (r["path"], r["id"], rel, unicodedata.normalize("NFD", rel))).fetchone()
+                        or self.db.execute(q + "nfc(relpath)=?", (r["path"], r["id"], rel)).fetchone())  # mixed forms
         return None
 
 

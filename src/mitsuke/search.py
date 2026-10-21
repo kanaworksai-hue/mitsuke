@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from . import thumbs
+from .paths import nfc
 from .decode import load_preview
 from .indexer import PREVIEW_SIDE
 
@@ -54,9 +55,11 @@ def _allowed_files(store, root: str | None, kinds) -> np.ndarray | None:
         return None
     where, args = [], []
     if root:
-        root = os.path.abspath(os.path.expanduser(root)).rstrip("/")
-        where.append("(r.path = ? OR r.path LIKE ? OR ? LIKE r.path || '/%')")
-        args += [root, root + "/%", root]
+        root = nfc(os.path.realpath(os.path.abspath(os.path.expanduser(root)))).rstrip("/")  # roots are real paths
+        ids = [r["id"] for r in store.roots() if (rp := nfc(r["path"])) == root or rp.startswith(root + "/")
+               or root.startswith(rp + "/")]
+        where.append(f"r.id IN ({','.join('?' * len(ids)) or 'NULL'})")
+        args += ids
     if kinds:
         where.append(f"f.kind {'NOT ' if invert else ''}IN ({','.join('?' * len(kinds))})")
         args += kinds
@@ -64,7 +67,7 @@ def _allowed_files(store, root: str | None, kinds) -> np.ndarray | None:
     allowed = []
     for row in store.db.execute(q, args):
         # --root may also be a sub-folder of a root
-        if root and not os.path.join(row["root"], row["relpath"]).startswith(root + "/"):
+        if root and not nfc(os.path.join(row["root"], row["relpath"])).startswith(root + "/"):
             continue
         allowed.append(row["id"])
     return np.array(allowed, dtype=np.int64)

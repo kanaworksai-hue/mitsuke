@@ -92,3 +92,24 @@ def test_video_index_and_search(tmp_path, capsys):
     assert {r["kind"] for r in json.loads(capsys.readouterr().out)["results"]} == {"png"}
     main(["--json", "search", "x", "--kind", "video"])
     assert {r["kind"] for r in json.loads(capsys.readouterr().out)["results"]} == {"video"}
+    # `similar` takes a video shot like every other image reference
+    shot = v["shots"][1]["shot"]
+    main(["--json", "similar", f"s{shot}"])
+    out = json.loads(capsys.readouterr().out)
+    assert out["shot"] == shot and out["image"] == v["path"] and out["in_library"]
+    vid = [r for r in out["results"] if r["kind"] == "video"]
+    assert len(out["results"]) == 2 and vid[0]["shot"] != shot  # the query shot itself is left out
+
+
+def test_black_frames_are_skipped(tmp_path):
+    from mitsuke.video import _dark, load_segments
+
+    # black leader, a red shot that fades to black halfway, then a green shot
+    p = _write_video(tmp_path / "fade.mp4", [(0, 0, 0), (30, 30, 200), (0, 0, 0), (30, 200, 30)])
+    _, segs = load_segments(str(p))
+    assert segs and not any(_dark(s.image) for s in segs)
+    assert segs[0].t0 >= 2.5  # the black leader is gone
+
+    p = _write_video(tmp_path / "black.mp4", [(0, 0, 0)], seconds_each=4)
+    _, segs = load_segments(str(p))
+    assert len(segs) >= 1  # an all-black video still gets a shot

@@ -12,6 +12,8 @@ const fmtTime = (t) => { t = Math.floor(t || 0); const h = Math.floor(t / 3600),
 const fmtBytes = (b) => b >= 1 << 30 ? (b / (1 << 30)).toFixed(1) + " GB" : b >= 1 << 20 ? (b / (1 << 20)).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1024)) + " KB";
 const num = (n) => (n ?? 0).toLocaleString();
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+// Enter that only confirms an IME candidate (Japanese / Chinese input) must not submit; Safari reports it as keyCode 229
+const composing = (e) => e.isComposing || e.keyCode === 229;
 
 const ICON = {
   img: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg>',
@@ -62,25 +64,32 @@ async function api(method, path, body, opts = {}) {
   }
   const r = await fetch(path, { method, headers, body: data });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || r.statusText);
+  if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { status: r.status });
   return j;
 }
 
 // ---- URL state (so a search is a link, and Back works) -----------------------------------------
 
-function writeHash() {
+const hasQuery = () => !!(S.text.trim() || S.chips.length);
+
+/** → true if the URL changed. Each search gets its own history entry; `replace` while a search is still being typed. */
+function writeHash(replace = false) {
   const p = new URLSearchParams();
-  if (S.text) p.set("q", S.text);
-  if (S.chips.length) p.set("img", S.chips.filter((c) => !c.upload).map((c) => c.board ? `b${c.board}` : c.shot ? `s${c.shot}` : `f${c.file}`).join(","));
-  if (S.chips.length && S.text && S.weight !== 0.5) p.set("w", S.weight);
+  if (S.text.trim()) p.set("q", S.text);
+  const img = S.chips.filter((c) => !c.upload).map((c) => c.board ? `b${c.board}` : c.shot ? `s${c.shot}` : `f${c.file}`);
+  if (img.length) p.set("img", img.join(","));
+  if (img.length && S.text.trim() && S.weight !== 0.5) p.set("w", S.weight);
   if (S.kind !== "all") p.set("kind", S.kind);
   if (S.root) p.set("root", S.root);
   if (S.board) p.set("board", S.board);
   const h = p.toString();
-  if (("#" + h) !== location.hash && !(h === "" && !location.hash)) history.replaceState(null, "", h ? "#" + h : location.pathname);
+  if (("#" + h) === location.hash || (h === "" && !location.hash)) return false;
+  history[replace ? "replaceState" : "pushState"](null, "", h ? "#" + h : location.pathname + location.search);
+  return true;
 }
 
 async function readHash() {
+  typingEntry = false;
   const p = new URLSearchParams(location.hash.slice(1));
   S.text = p.get("q") || "";
   S.kind = p.get("kind") || "all";
@@ -92,26 +101,30 @@ async function readHash() {
     const id = +tok.slice(1);
     if (tok[0] === "f") {
       try { const it = await api("GET", `/api/item/${id}`); S.chips.push({ file: id, thumb: it.thumb, label: it.name }); } catch {}
-    } else if (tok[0] === "s") S.chips.push({ shot: id, thumb: null, label: "shot" });
-    else if (tok[0] === "b") {
+    } else if (tok[0] === "s") {
+      try { const s = await api("GET", `/api/shot/${id}`); S.chips.push({ shot: id, file: s.file, thumb: s.thumb, label: s.name, time: s.time }); } catch {}
+    } else if (tok[0] === "b") {
       try { S.chips.push(boardChip(await api("GET", `/api/boards/${id}`))); } catch {}
     }
   }
-  S.view = S.board ? "board" : (S.text || S.chips.length) ? "search" : "all";
+  S.view = S.board ? "board" : hasQuery() ? "search" : "all";
 }
 
 // ---- results ----------------------------------------------------------------------------------
 
 function kindsParam() { return (KINDS.find((k) => k[0] === S.kind) || [])[1] || null; }
 
-async function load(more = false) {
+/** more: next page. soft: refresh in place (new files indexed) — keeps the grid, the scroll position and the selection. */
+async function load(more = false, soft = false) {
   const req = ++S.req;
-  if (!more) { S.results = []; S.sel = -1; S.exhausted = false; S.total = null; }
+  const keep = soft ? S.results[S.sel] : null;
+  if (!more) { S.exhausted = false; if (!soft) { S.results = []; S.sel = -1; S.total = null; } }
   if (S.exhausted) return;
   S.loading = true;
   renderCrumb();
-  if (!more) renderResults();
-  const offset = S.results.length, k = 120;
+  if (!more && !soft) renderResults();
+  const offset = more ? S.results.length : 0, k = 120;
+  let kept = false; // the selected item is still there: leave the inspector (and a playing video) alone
   try {
     let r;
     if (S.view === "board") {
@@ -126,16 +139,23 @@ async function load(more = false) {
       r = await api("POST", "/api/browse", { kinds: kindsParam(), root: S.root, k, offset });
     }
     if (req !== S.req) return;
-    S.results = S.results.concat(r.results);
+    S.results = more ? S.results.concat(r.results) : r.results;
     S.ms = r.ms ?? null;
     if (r.total != null) S.total = r.total;
     S.exhausted = r.results.length < k || S.view === "board" || (S.view === "search" && S.results.length >= 480);
     if (S.view === "search") S.total = S.exhausted ? S.results.length : null;
-    if (!more && S.results.length) S.sel = 0;
+    if (!more) {
+      const i = keep ? S.results.findIndex((h) => h.id === keep.id && (h.shot || 0) === (keep.shot || 0)) : -1;
+      kept = i >= 0;
+      S.sel = kept ? i : S.results.length ? 0 : -1;
+    }
   } catch (e) {
-    if (req === S.req) toast(e.message);
+    if (req === S.req) { toast(e.message); kept = soft; }
   } finally {
-    if (req === S.req) { S.loading = false; renderCrumb(); renderSide(); renderResults(!more); if (!more) renderInspector(); }
+    if (req === S.req) {
+      S.loading = false; renderCrumb(); renderSide(); renderResults(!more && !soft);
+      if (!more && !kept) renderInspector();
+    }
   }
 }
 
@@ -146,12 +166,14 @@ function matchesKind(h) {
   return ks.flatMap((k) => map[k] || [k]).includes(h.kind);
 }
 
-const search = debounce(() => go(), 450);
+const search = debounce(() => go(true), 450);
+let typingEntry = false; // the current history entry is a search still being typed: update it instead of stacking more
 
-function go() {
-  S.view = S.board && !S.text && !S.chips.length ? "board" : (S.text || S.chips.length) ? "search" : "all";
+function go(typing = false) {
+  S.view = S.board && !hasQuery() ? "board" : hasQuery() ? "search" : "all";
   if (S.view === "search") S.board = null;
-  writeHash();
+  const changed = writeHash(typing && typingEntry);
+  if (!typing) typingEntry = false; else if (changed) typingEntry = true;
   renderComposer();
   renderSide();
   load();
@@ -185,7 +207,7 @@ function renderSide() {
   const st = S.status || {};
   const parts = [];
   parts.push(`<h4>${esc(t("library"))}</h4>`);
-  if (S.text || S.chips.length) parts.push(`<button class="it ${S.view === "search" ? "on" : ""}" data-go="search">${ICON.search}<span class="nm">${esc(t("results"))}</span><span class="n">${S.view === "search" ? num(S.results.length) : ""}</span></button>`);
+  if (hasQuery()) parts.push(`<button class="it ${S.view === "search" ? "on" : ""}" data-go="search">${ICON.search}<span class="nm">${esc(t("results"))}</span><span class="n">${S.view === "search" ? num(S.results.length) : ""}</span></button>`);
   parts.push(`<button class="it ${S.view === "all" && !S.root ? "on" : ""}" data-go="all">${ICON.all}<span class="nm">${esc(t("all_images"))}</span><span class="n">${num(st.indexed)}</span></button>`);
   parts.push(`<h4>${esc(t("folders"))}<button data-act="addfolder" title="${esc(t("add_folder"))}">+</button></h4>`);
   for (const f of S.folders) {
@@ -197,7 +219,10 @@ function renderSide() {
   if (S.newBoard) parts.push(`<div class="inline"><input id="boardname" placeholder="${esc(t("board_ph"))}"></div>`);
   for (const b of S.boards) parts.push(`<button class="it ${S.view === "board" && S.board === b.id ? "on" : ""}" data-board="${b.id}">${ICON.board}<span class="nm">${esc(b.name)}</span><span class="n">${num(b.count)}</span></button>`);
   if (!S.boards.length && !S.newBoard) parts.push(`<div class="it add" style="font-size:12px">${esc(t("boards_hint"))}</div>`);
+  // the sidebar re-renders on every search and status change: keep what is being typed in its inline inputs
+  const typed = ["folderpath", "boardname"].map((id) => [id, $("#" + id)?.value, document.activeElement?.id === id]);
   side.innerHTML = parts.join("");
+  for (const [id, v, f] of typed) { const n = $("#" + id); if (n && v != null) { n.value = v; if (f) n.focus(); } }
   side.querySelectorAll("[data-go]").forEach((b) => b.onclick = () => {
     if (b.dataset.go === "all") { S.text = ""; S.chips = []; S.root = null; S.board = null; }
     go();
@@ -214,14 +239,22 @@ function renderSide() {
   });
   const af = side.querySelector('[data-act="addfolder"]'); if (af) af.onclick = () => { S.addingFolder = !S.addingFolder; renderSide(); $("#folderpath")?.focus(); };
   const pk = side.querySelector('[data-act="pick"]'); if (pk) pk.onclick = pickFolder;
-  const fp = $("#folderpath"); if (fp) fp.onkeydown = (e) => { if (e.key === "Enter") addFolder(fp.value); if (e.key === "Escape") { S.addingFolder = false; renderSide(); } };
+  const fp = $("#folderpath"); if (fp) fp.onkeydown = (e) => { if (e.key === "Enter" && !composing(e)) addFolder(fp.value); if (e.key === "Escape") { S.addingFolder = false; renderSide(); } };
   const nb = side.querySelector('[data-act="newboard"]'); if (nb) nb.onclick = () => { S.newBoard = true; renderSide(); $("#boardname").focus(); };
   const bn = $("#boardname"); if (bn) {
     bn.onkeydown = async (e) => {
       if (e.key === "Escape") { S.newBoard = false; renderSide(); }
-      if (e.key === "Enter") { S.newBoard = false; const b = await api("POST", "/api/boards", { name: bn.value }); S.lastBoard = b.id; localStorage.setItem("mitsuke.lastBoard", b.id); await refreshBoards(); }
+      if (e.key === "Enter" && !composing(e)) {
+        S.newBoard = false;
+        if (!bn.value.trim()) return renderSide();
+        try {
+          const b = await api("POST", "/api/boards", { name: bn.value });
+          S.lastBoard = b.id; localStorage.setItem("mitsuke.lastBoard", b.id);
+        } catch (er) { toast(er.message); }
+        await refreshBoards(); renderSide();
+      }
     };
-    bn.onblur = () => { if (S.newBoard) { S.newBoard = false; renderSide(); } };
+    bn.onblur = () => { if (S.newBoard && bn.isConnected) { S.newBoard = false; renderSide(); } };
   }
 }
 
@@ -235,7 +268,7 @@ function renderCrumb() {
     extra = `<span class="sp"></span><button data-b="like">${esc(t("search_like_board"))}</button><button data-b="copy">${esc(t("copy_paths"))}</button><button data-b="rename">${esc(t("rename"))}</button><button data-b="delete">${esc(t("delete"))}</button>`;
   } else if (S.view === "search") {
     const nimg = S.chips.reduce((a, c) => a + (c.board ? c.items.length : 1), 0);
-    const what = [nimg ? esc(t("crumb_images", { n: nimg })) : "", S.text ? `「${esc(S.text)}」` : ""].filter(Boolean).join(" + ");
+    const what = [nimg ? esc(t("crumb_images", { n: nimg })) : "", S.text.trim() ? esc(t("quote", { q: S.text.trim() })) : ""].filter(Boolean).join(" + ");
     title = `<b>${what}</b>`;
   } else title = `<b>${esc(S.root ? S.root.split("/").pop() : t("all_images"))}</b>`;
   const n = S.loading && !S.results.length ? t("searching") : S.total != null ? t("n_items", { n: num(S.total) }) : t("n_items_plus", { n: num(S.results.length) });
@@ -249,7 +282,9 @@ function cardHTML(h, i) {
   const cap = S.view === "search" ? (S.chips.length && S.text ? h.score.toFixed(1) : h.score.toFixed(2)) : h.kind.toUpperCase();
   return `<div class="card ${i === S.sel ? "sel" : ""}" data-i="${i}" draggable="true">
     <div class="im"><img loading="lazy" src="${esc(h.thumb)}" alt=""></div>${badge}
-    <div class="acts"><button data-a="similar" title="${esc(t("similar"))} (S)">${ICON.similar}</button><button data-a="board" title="${esc(t("to_board"))} (B)">${ICON.board}</button></div>
+    <div class="acts"><button data-a="similar" title="${esc(t("similar"))} (S)">${ICON.similar}</button>${S.view === "board"
+      ? `<button data-a="unboard" title="${esc(t("remove_from_board"))} (Delete)">×</button>`
+      : `<button data-a="board" title="${esc(t("to_board"))} (B)">${ICON.board}</button>`}</div>
     <div class="cap"><span>${esc(h.name)}</span><span>${esc(cap)}</span></div></div>`;
 }
 
@@ -285,6 +320,7 @@ function renderResults(scrollTop = false) {
       const a = e.target.closest("[data-a]")?.dataset.a;
       if (a === "similar") return similar(S.results[i]);
       if (a === "board") return boardMenu(S.results[i], e);
+      if (a === "unboard") return removeFromBoard(S.results[i]);
       select(i);
     };
     c.ondblclick = () => { select(i); openLoupe(); };
@@ -313,7 +349,7 @@ function emptyHTML() {
 function bindEmpty() {
   const inp = $("#firstfolder");
   if (!inp) return;
-  inp.onkeydown = (e) => { if (e.key === "Enter") addFolder(inp.value); };
+  inp.onkeydown = (e) => { if (e.key === "Enter" && !composing(e)) addFolder(inp.value); };
   $('[data-act="add"]').onclick = () => addFolder(inp.value);
   $('#results [data-act="pick"]').onclick = pickFolder;
 }
@@ -357,7 +393,7 @@ async function renderInspector() {
   box.querySelector('[data-a="copy"]').onclick = () => copyText(h.path);
   const lb = $("#likebut");
   lb.onkeydown = (e) => {
-    if (e.key === "Enter" && !e.isComposing && lb.value.trim()) {
+    if (e.key === "Enter" && !composing(e) && lb.value.trim()) {
       S.chips = [chipFor(h)]; S.text = lb.value.trim(); S.weight = 0.5; go();
     }
   };
@@ -420,7 +456,20 @@ function renderLoupe() {
 
 // ---- boards -----------------------------------------------------------------------------------
 
-async function refreshBoards() { S.boards = (await api("GET", "/api/boards")).boards; renderSide(); }
+async function refreshBoards() {
+  const b = (await api("GET", "/api/boards")).boards;
+  if (JSON.stringify(b) !== JSON.stringify(S.boards)) { S.boards = b; renderSide(); } // also boards made by the CLI / an agent
+}
+
+async function removeFromBoard(h) {
+  const sel = S.sel;
+  try {
+    await api("DELETE", `/api/boards/${S.board}/items`, { items: [{ file: h.id, shot: h.shot || 0 }] });
+    await refreshBoards();
+    await load();
+    select(Math.min(sel, S.results.length - 1));
+  } catch (e) { toast(e.message); }
+}
 
 async function addToBoard(bid, items) {
   try {
@@ -476,7 +525,10 @@ function dragItem(e) {
 
 // ---- folders ----------------------------------------------------------------------------------
 
-async function refreshFolders() { S.folders = (await api("GET", "/api/folders")).folders; renderSide(); }
+async function refreshFolders() {
+  const f = (await api("GET", "/api/folders")).folders;
+  if (JSON.stringify(f) !== JSON.stringify(S.folders)) { S.folders = f; renderSide(); } // e.g. a folder went offline
+}
 
 async function addFolder(path) {
   if (!path || !path.trim()) return;
@@ -487,17 +539,25 @@ async function addFolder(path) {
     await refreshStatus();
     await refreshFolders();
     if (!S.results.length) load();
-  } catch (e) { toast(e.message); }
+  } catch (e) {
+    // the server's messages are English: show the common ones in the UI language
+    toast(/^not a folder/.test(e.message) ? t("not_folder", { path: path.trim() }) : / overlaps with /.test(e.message) ? t("folder_overlap") : e.message);
+  }
 }
 
 async function pickFolder() {
-  try { const r = await api("POST", "/api/folders/pick"); if (r.path) addFolder(r.path); } catch (e) { toast(e.message); }
+  try { const r = await api("POST", "/api/folders/pick"); if (r.path) addFolder(r.path); } catch (e) {
+    if (e.status !== 501) return toast(e.message);
+    toast(t("type_path")); // no folder dialog (not a Mac, or MITSUKE_NO_DESKTOP)
+    if (!$("#firstfolder")) { S.addingFolder = true; renderSide(); }
+    ($("#firstfolder") || $("#folderpath"))?.focus();
+  }
 }
 
 async function removeFolder(id, path) {
   if (!confirm(t("remove_folder_q", { path }))) return;
   await api("DELETE", `/api/folders/${id}`);
-  if (S.root && S.root.startsWith(path)) S.root = null;
+  if (S.root && (S.root === path || S.root.startsWith(path + "/"))) S.root = null;
   await refreshStatus(); await refreshFolders(); go();
 }
 
@@ -510,7 +570,7 @@ async function uploadFile(file) {
     S.chips.push({ upload: r.upload, thumb: r.thumb, label: file.name || "" });
     hideToast();
     go();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(e.status === 415 ? t("not_image") : e.message); }
 }
 
 function setupDrop() {
@@ -548,10 +608,9 @@ async function refreshStatus() {
   try { S.status = await api("GET", "/api/status"); } catch { S.status = null; }
   renderStatus();
   const st = S.status;
-  if (st && lastIndexed !== null && st.indexed !== lastIndexed) {
-    refreshFolders();
-    if (S.view === "all" && (S.results.length < 120 || !S.results.length)) load();
-  }
+  if (st) { refreshFolders().catch(() => {}); refreshBoards().catch(() => {}); }
+  // new files indexed: refresh the browse view in place, unless the user has scrolled past the first page
+  if (st && lastIndexed !== null && st.indexed !== lastIndexed && S.view === "all" && !S.loading && S.results.length <= 120) load(false, true);
   if (st) lastIndexed = st.indexed;
 }
 
@@ -609,7 +668,7 @@ function setupInputs() {
   q.addEventListener("input", (e) => { S.text = q.value; if (!e.isComposing) search(); });
   q.addEventListener("compositionend", () => { S.text = q.value; search(); });
   q.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); S.text = q.value; go(); q.blur(); }
+    if (e.key === "Enter" && !composing(e)) { e.preventDefault(); S.text = q.value; go(); q.blur(); }
     if (e.key === "Escape") { q.blur(); }
     if (e.key === "Backspace" && !q.value && S.chips.length) { S.chips.pop(); go(); }
   });
@@ -631,6 +690,7 @@ function setupInputs() {
     if (typing) return;
     if (e.key === "/") { e.preventDefault(); q.focus(); q.select(); return; }
     if (e.key === "Escape") { if (S.loupe) closeLoupe(); else if (S.text || S.chips.length) { S.text = ""; S.chips = []; go(); } return; }
+    if (e.key === "Enter" && e.target.closest?.("button, a")) return; // a focused button: let Enter press it
     if (e.key === " " || e.key === "Enter") { e.preventDefault(); S.loupe ? closeLoupe() : openLoupe(); return; }
     const cols = S.loupe ? 1 : columns();
     const mv = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: S.loupe ? 1 : cols, ArrowUp: S.loupe ? -1 : -cols }[e.key];
@@ -639,6 +699,7 @@ function setupInputs() {
     if (!h || e.metaKey || e.ctrlKey) return;
     if (e.key === "s" || e.key === "S") { closeLoupe(); similar(h); }
     if (e.key === "b" || e.key === "B") { if (S.lastBoard && S.boards.some((b) => b.id === S.lastBoard)) addToBoard(S.lastBoard, [{ file: h.id, shot: h.shot || 0 }]); else boardMenu(h, { target: $("#inspector .acts2") || document.body }); }
+    if ((e.key === "Delete" || e.key === "Backspace") && S.view === "board") { e.preventDefault(); removeFromBoard(h); }
     if (e.key === "r" || e.key === "R") api("POST", `/api/reveal/${h.id}`).catch((er) => toast(er.message));
   });
 }

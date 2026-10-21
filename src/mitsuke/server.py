@@ -16,6 +16,7 @@ import json
 import mimetypes
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -147,7 +148,8 @@ class Indexer(threading.Thread):
             try:
                 self.wake.clear()
                 self._pass(store)
-                roots = {r["id"]: r["path"] for r in store.roots() if os.path.isdir(r["path"])}
+                # offline folders too: the watcher picks them up when they come (back) online
+                roots = {r["id"]: r["path"] for r in store.roots()}
                 if not roots:
                     self.state = {**self.state, "state": "idle"}
                     self.wake.wait()
@@ -314,6 +316,16 @@ class Api:
         out["view"] = f"/api/view/{fid}"
         return out
 
+    def shot(self, sid: int) -> dict:
+        """A video shot by id (the page restores `img=s34` from the URL with it)."""
+        s = self.store.shots_by_ids([sid]).get(sid)
+        if s is None:
+            raise ApiError(404, "no such shot")
+        it = self.item(s["file_id"])
+        sh = next((x for x in it.get("shots", []) if x["shot"] == sid), {})
+        return {"shot": sid, "file": s["file_id"], "name": it["name"], "time": s["tm"], "t0": s["t0"], "t1": s["t1"],
+                "thumb": sh.get("thumb")}
+
     def upload(self, body: bytes, filename: str) -> dict:
         import tempfile
 
@@ -428,7 +440,13 @@ def make_handler(api: Api, allowed_hosts: set[str]):
 
         def _jbody(self) -> dict:
             b = self._body()
-            return json.loads(b) if b else {}
+            try:
+                out = json.loads(b) if b else {}
+            except ValueError:
+                raise ApiError(400, "invalid JSON") from None
+            if not isinstance(out, dict):
+                raise ApiError(400, "expected a JSON object")
+            return out
 
         def _file(self, p: Path, ctype: str | None = None, cache: str = "no-cache"):
             try:
@@ -554,6 +572,8 @@ def make_handler(api: Api, allowed_hosts: set[str]):
                         return self._json(api.board(int(m.group(1))))
                     if m := re.match(r"^/api/item/(\d+)$", path):
                         return self._json(api.item(int(m.group(1))))
+                    if m := re.match(r"^/api/shot/(\d+)$", path):
+                        return self._json(api.shot(int(m.group(1))))
                 if method == "POST":
                     if path == "/api/search":
                         return self._json(api.search(self._jbody()))
@@ -589,11 +609,24 @@ def make_handler(api: Api, allowed_hosts: set[str]):
                 return self._json({"error": str(e)}, 400)
             except (BrokenPipeError, ConnectionResetError):
                 return None
+            except (ValueError, TypeError, KeyError, OverflowError, sqlite3.IntegrityError) as e:
+                # malformed input (not a number, an id that does not exist): the client's fault, no traceback
+                return self._json({"error": f"bad request: {type(e).__name__}: {e}"}, 400)
             except Exception as e:  # noqa: BLE001
                 traceback.print_exc()
                 return self._json({"error": f"{type(e).__name__}: {e}"}, 500)
 
     return H
+
+
+class _HTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        """A browser dropping a keep-alive connection is normal: only print real errors."""
+        if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
 
 
 class Server:
@@ -608,13 +641,12 @@ class Server:
         self.httpd = None
         for p in range(port, port + 20) if port else [0]:
             try:
-                self.httpd = ThreadingHTTPServer(("127.0.0.1", p), make_handler(self.api, {"127.0.0.1", "localhost"}))
+                self.httpd = _HTTPServer(("127.0.0.1", p), make_handler(self.api, {"127.0.0.1", "localhost"}))
                 break
             except OSError:
                 continue
         if self.httpd is None:
             raise OSError(f"no free port from {port}")
-        self.httpd.daemon_threads = True
         self.port = self.httpd.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}/"
         self.warm = warm

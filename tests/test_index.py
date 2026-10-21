@@ -75,6 +75,9 @@ def test_filters(library):
     sub = os.path.realpath(library / "set1")
     hits = rank(s, "fake", q, k=20, root=sub)
     assert len(hits) == 3 and all(h["path"].startswith(sub + "/") for h in hits)
+    # a path through a symlink (like /tmp or /var on macOS) still matches the stored, resolved folder
+    (library.parent / "link").symlink_to(library)
+    assert len(rank(s, "fake", q, k=20, root=str(library.parent / "link" / "set1"))) == 3
 
 
 def test_rename_move_keep_vectors(library):

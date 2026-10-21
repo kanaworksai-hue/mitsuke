@@ -35,7 +35,7 @@ Image references, everywhere: a file id from a result (`12`, CLI also `#12`), a 
 | Moodboards | `list_boards`, `board_create {name, images}`, `board_add`, `board_remove`, `board_show`, `board_rename`, `board_delete` | `mitsuke board list / create "Name" --add 12 / add 3 12 s34 / remove 3 12 / show 3 / rename 3 "New" / delete 3` |
 | Link to the web app | `web_link {query \| like \| board, start: true}` | `mitsuke web "query" --start --json` (`--board 3` opens a board) |
 | What is indexed | `status` | `mitsuke status --json` |
-| Add folders, index | `add_folder {path}` then `index {wait_seconds}` | `mitsuke add <folder>` then `mitsuke index --json` |
+| Add folders, index | `add_folder {path}` (absolute path) then `index {wait_seconds}` | `mitsuke add <folder>` then `mitsuke index --json` |
 
 Filters on searches: `k` (number of results, default 20), `root` (only inside a folder or sub-folder), `kinds`
 (`image` = everything except video, `photo`, `raw`, `psd`, `hdr`, `video`, or a format such as `jpeg`, `png`, `exr`).
@@ -78,6 +78,7 @@ Filters on searches: `k` (number of results, default 20), `root` (only inside a 
 ## Good to know
 
 - Only one indexer runs at a time (`mitsuke index`, `mitsuke serve` and the MCP `index` share a lock); if another
-  one is busy, `index` reports `external` — searching still works and the other process finishes the job.
+  one is busy, MCP `index` reports `external` and the CLI exits with "another `mitsuke index` is already running" —
+  searching still works and the other process finishes the job.
 - `status` lists files that failed to decode (`recent_errors`); `mitsuke doctor --json` checks the whole setup.
 - Removing a folder or a moodboard never touches the user's files.
