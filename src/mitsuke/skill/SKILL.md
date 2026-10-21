@@ -71,7 +71,8 @@ Filters on searches: `k` (number of results, default 20), `root` (only inside a 
 2. **"Where is that picture of…"**: `search` → if unsure, `view_images` on the top 6 → `file_info` / `open_file`
    with `reveal: true` if the user wants it in Finder.
 3. **Empty library** (results empty with a hint): ask the user which folders hold their images, `add_folder` each,
-   `index` (it continues in the background; `status` shows progress; searching works while it runs). In the CLI,
+   `index` (it continues in the background while this MCP session is open; `status` shows progress; searching
+   works while it runs; for a big library suggest `mitsuke serve`, which keeps going after the session). In the CLI,
    `mitsuke index` blocks until done — for big folders run it in the background or suggest `mitsuke serve`,
    which indexes and watches folders while the web app is open.
 
@@ -79,6 +80,7 @@ Filters on searches: `k` (number of results, default 20), `root` (only inside a 
 
 - Only one indexer runs at a time (`mitsuke index`, `mitsuke serve` and the MCP `index` share a lock); if another
   one is busy, MCP `index` reports `external` and the CLI exits with "another `mitsuke index` is already running" —
-  searching still works and the other process finishes the job.
+  searching still works and the other process finishes the job (a running `serve` or `index --watch` also picks
+  up folders added with `mitsuke add` within a few seconds).
 - `status` lists files that failed to decode (`recent_errors`); `mitsuke doctor --json` checks the whole setup.
 - Removing a folder or a moodboard never touches the user's files.

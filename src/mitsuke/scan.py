@@ -15,6 +15,7 @@ SKIP_DIRS = {
 SKIP_DIR_SUFFIXES = (".app", ".photoslibrary", ".lrdata", ".fcpbundle", ".bundle", ".framework", ".xcassets")
 MIN_BYTES = 256  # anything smaller is not a real image (64 px minimum side is checked after decode)
 HEAD_BYTES = 1 << 20
+SAMPLE_BYTES = 1 << 16
 
 
 def kind_of(path: str) -> str:
@@ -78,12 +79,28 @@ def walk(root: str | Path):
             yield os.path.relpath(e.path, root).replace(os.sep, "/"), s.st_size, s.st_mtime_ns
 
 
-def content_hash(path: str | Path, size: int | None = None) -> str:
-    """sha1 of the first 1 MB plus the file size: cheap, and stable across renames / moves."""
-    h = hashlib.sha1()
-    with open(path, "rb") as f:
-        h.update(f.read(HEAD_BYTES))
+def content_hashes(path: str | Path, size: int | None = None) -> tuple[str, str]:
+    """(hash, legacy hash). The hash covers the first and last 1 MB, 8 blocks of 64 KB spread in between, and
+    the size: cheap, stable across renames / moves, and it changes when an uncompressed file (BMP, TIFF, EXR) is
+    edited in place at the same size — those keep their first rows. The legacy hash (first 1 MB + size, used
+    before) only matters for pairing moves of files indexed by an older version. Up to 1 MB both are the same."""
     if size is None:
         size = os.path.getsize(path)
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        head = f.read(HEAD_BYTES)
+        h.update(head)
+        legacy = h.copy()
+        if size > HEAD_BYTES:
+            for i in range(1, 9):
+                f.seek(HEAD_BYTES + (size - 2 * HEAD_BYTES) * i // 9)
+                h.update(f.read(SAMPLE_BYTES))
+            f.seek(max(HEAD_BYTES, size - HEAD_BYTES))
+            h.update(f.read(HEAD_BYTES))
     h.update(str(size).encode())
-    return h.hexdigest()
+    legacy.update(str(size).encode())
+    return h.hexdigest(), legacy.hexdigest()
+
+
+def content_hash(path: str | Path, size: int | None = None) -> str:
+    return content_hashes(path, size)[0]

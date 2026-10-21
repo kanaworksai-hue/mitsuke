@@ -83,7 +83,7 @@ def test_tools_end_to_end(mcp, library, tmp_path):
 
     assert mcp.tool("add_folder", path=str(library))["new"]
     assert "not a folder" in mcp.tool("add_folder", ok=False, path=str(tmp_path / "nope"))
-    ix = mcp.tool("index", wait_seconds=60)
+    ix = mcp.tool("index", wait_seconds=50)
     assert ix["done"] and ix["indexed"] == 7 and ix["pending"] == 0 and ix["indexing"]["state"] == "done"
 
     res = mcp.tool("search", query="雪の中の鳥居", k=3)
@@ -138,7 +138,7 @@ def test_index_lock_shared(mcp, library):
         ix = mcp.tool("index", wait_seconds=10)
         assert ix["indexing"]["state"] == "external" and ix["indexed"] == 0 and ix["done"] is False
         fcntl.flock(f, fcntl.LOCK_UN)
-    ix = mcp.tool("index", wait_seconds=60)
+    ix = mcp.tool("index", wait_seconds=50)
     assert ix["indexed"] == 7
 
 
@@ -160,7 +160,7 @@ def test_arguments_checked(mcp, library, tmp_path):
     assert "absolute path" in mcp.tool("add_folder", ok=False, path="lib")
     assert "absolute path" in mcp.tool("remove_folder", ok=False, folder="")
     mcp.tool("add_folder", path=str(library))
-    assert mcp.tool("index", wait_seconds=60)["indexed"] == 7
+    assert mcp.tool("index", wait_seconds=50)["indexed"] == 7
     first = mcp.tool("search", query="torii", k=3)["results"][0]["id"]
 
     assert "unknown argument 'kind'" in mcp.tool("search", ok=False, query="x", kind="video")
@@ -228,3 +228,40 @@ def test_no_voice_tool(mcp):
     """Voice search was removed (users have their own dictation); the server must not offer it."""
     mcp.request("initialize", {})
     assert "voice_search" not in {t["name"] for t in mcp.request("tools/list")["result"]["tools"]}
+
+
+def test_lone_surrogate_does_not_end_the_session(mcp):
+    """A reply that echoes a lone UTF-16 surrogate from the request used to crash the encoder and end the server."""
+    mcp.request("initialize", {})
+    mcp.send({"jsonrpc": "2.0", "id": "\ud800", "method": "ping"})
+    assert json.loads(mcp.p.stdout.readline())["id"] == "\ud800"
+    assert "unknown tool" in mcp.tool("x\ud83d", ok=False)
+    assert mcp.request("ping")["result"] == {}
+
+
+def test_index_wait_does_not_block_other_requests():
+    """`index` waits for progress on its own thread: pings are answered meanwhile, and a cancelled call gets no reply."""
+    import io
+    import threading
+
+    from mitsuke import mcp as m
+
+    class App:
+        def index(self, wait_seconds=20, _cancel=None):
+            _cancel.wait(10)
+            return {"done": False}
+
+    out = io.StringIO()
+    srv = m.Server(out)
+    srv.app = App()
+    lines = [json.dumps(x) for x in (
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "index", "arguments": {"wait_seconds": 30}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "ping"},
+        {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1}},
+    )]
+    srv.run(iter(lines))
+    for t in threading.enumerate():
+        if t.name == "mitsuke-mcp-answer":
+            t.join(5)
+    replies = [json.loads(l) for l in out.getvalue().splitlines()]
+    assert [r["id"] for r in replies] == [2] and not srv.waiting

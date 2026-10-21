@@ -75,6 +75,26 @@ def test_errors_are_json(capsys, tmp_path):
     assert code == 0 and out[0]["text"].startswith("---\nname: mitsuke")
 
 
+def test_remove_checks_every_folder_first(library, capsys, tmp_path):
+    run(capsys, "add", str(library))
+    code, out = run(capsys, "remove", str(library), str(tmp_path / "nope"))
+    assert code == 1 and "not a library folder" in out[0]["error"]
+    _, out = run(capsys, "roots")
+    assert len(out[0]["roots"]) == 1  # nothing was removed
+
+
+def test_unexpected_errors_are_json_too(capsys, tmp_path, monkeypatch):
+    f = tmp_path / "a file"
+    f.write_text("x")
+    code, out = run(capsys, "skill", "install", "--dir", str(f))
+    assert code == 1 and out[0]["error"]
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    (home / "index.sqlite").write_bytes(b"this is not a database" * 100)
+    code, out = run(capsys, "status")
+    assert code == 1 and "index database cannot be read" in out[0]["error"]
+
+
 def test_overlapping_roots_rejected(library, capsys):
     run(capsys, "add", str(library))
     code, out = run(capsys, "add", str(library / "set0"))

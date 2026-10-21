@@ -265,6 +265,16 @@ class Api:
     # search
     def _query_vectors(self, images) -> tuple[list[np.ndarray], set[int], set[int]]:
         images = images or []
+        expanded = []
+        for im in images:  # a whole board: only its items that have a vector (see library.board_refs)
+            if "board" in im:
+                refs = library.board_refs(self.store, int(im["board"]))
+                if not refs:
+                    raise ApiError(404, "this board has no indexed images yet")
+                expanded += refs
+            else:
+                expanded.append(im)
+        images = expanded
         for im in images:
             if "upload" in im and str(im["upload"]) not in self.uploads:
                 raise ApiError(404, "image not in the index (yet)")

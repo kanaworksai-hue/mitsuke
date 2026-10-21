@@ -5,6 +5,7 @@ import json
 import numpy as np
 import pytest
 
+from conftest import make_image
 from mitsuke.cli import main
 
 
@@ -102,6 +103,14 @@ def test_web_links(indexed, capsys, monkeypatch):
         assert out["url"] == srv.url + "#board=2"
         _, res = run(capsys, "search", "torii", "-k", "1")
         assert res["web"] == srv.url + "#q=torii"
+        # the page cannot show these searches: no link rather than a link to a different search
+        outside = make_image(indexed.parent / "outside.png", seed=40)
+        _, res = run(capsys, "search", "torii", "--like", str(outside), "-k", "1")
+        assert res["web"] is None
+        _, res = run(capsys, "search", "torii", "--kind", "jpeg", "-k", "1")
+        assert res["web"] is None
+        code, err = run(capsys, "web", "torii", "--kind", "jpeg")
+        assert code == 1 and "no filter for kind jpeg" in err["error"]
     finally:
         srv.stop()
     _, out = run(capsys, "web")

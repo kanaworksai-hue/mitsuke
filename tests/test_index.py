@@ -6,6 +6,7 @@ import pytest
 
 from conftest import make_image
 from mitsuke import indexer, thumbs
+from mitsuke import library as library_ops
 from mitsuke.model import FakeEmbedder
 from mitsuke.search import image_vector, rank, search_text
 from mitsuke.store import Store
@@ -177,6 +178,75 @@ def test_offline_root_is_kept(library, tmp_path):
     st = indexer.sync(s)
     assert st.offline and st.deleted == 0
     assert status_counts(s) == {"ok": 7}
+
+
+def test_offline_root_pending_files_are_not_deleted(library, tmp_path):
+    """Re-indexing (quality change, retry, an interrupted run) while a folder is offline must wait for it, not drop
+    its files — that used to delete them and cascade to their moodboard items."""
+    s, emb, _, _ = build(library)
+    fid = s.db.execute("SELECT id FROM files ORDER BY id LIMIT 1").fetchone()[0]
+    bid = library_ops.create_board(s, "Keep")["id"]
+    library_ops.board_add(s, bid, [{"file": fid}])
+    library.rename(tmp_path / "unplugged")
+    indexer.sync(s)
+    assert indexer.requeue_for(s, "fake", 280) == 7
+    counts = indexer.embed_pending(s, emb, 280)
+    assert counts["total"] == 0 and status_counts(s) == {"pending": 7}
+    (tmp_path / "unplugged").rename(library)
+    indexer.sync(s)
+    indexer.embed_pending(s, emb, 280)
+    assert status_counts(s) == {"ok": 7}
+    assert s.db.execute("SELECT COUNT(*) FROM board_items WHERE board_id=?", (bid,)).fetchone()[0] == 1
+
+
+def test_vanished_while_pending_is_left_to_sync(library):
+    """embed_pending never deletes: a file that vanished before it was embedded stays pending until the next sync."""
+    s = Store()
+    s.add_root(os.path.realpath(library))
+    indexer.sync(s)
+    (library / "photo.jpg").rename(library / "renamed.jpg")
+    emb = CountingEmbedder()
+    counts = indexer.embed_pending(s, emb, 140)
+    assert counts["gone"] == 1 and status_counts(s) == {"ok": 6, "pending": 1}
+    st = indexer.sync(s)
+    assert (st.new, st.deleted) == (1, 1)
+    indexer.embed_pending(s, emb, 140)
+    assert status_counts(s) == {"ok": 7}
+
+
+def test_in_place_edit_with_same_size(tmp_path):
+    """Uncompressed files edited in place keep their size and often their first 1 MB (BMP stores rows bottom-up):
+    the hash must still change, so the file is re-embedded and gets a new thumbnail."""
+    from PIL import Image
+
+    root = tmp_path / "bmp"
+    root.mkdir()
+    p = root / "plate.bmp"
+    a = np.random.default_rng(1).integers(0, 256, (900, 900, 3), dtype=np.uint8)
+    Image.fromarray(a).save(p)
+    s, emb, _, _ = build(root)
+    old = s.db.execute("SELECT sha1, size FROM files").fetchone()
+    a[:300] = (255, 0, 0)  # top rows = end of the file
+    Image.fromarray(a).save(p)
+    os.utime(p, ns=(7, 7))
+    assert os.path.getsize(p) == old["size"]
+    st = indexer.sync(s)
+    assert st.changed == 1 and st.touched == 0
+    indexer.embed_pending(s, emb, 140)
+    assert s.db.execute("SELECT sha1 FROM files").fetchone()[0] != old["sha1"]
+
+
+def test_move_of_file_hashed_by_older_version(library):
+    """Rows hashed the old way (first 1 MB + size) are still paired when the file is moved."""
+    from mitsuke.scan import content_hashes
+
+    s, emb, _, _ = build(library)
+    p = library / "photo.jpg"
+    legacy = content_hashes(p)[1]
+    s.db.execute("UPDATE files SET sha1=? WHERE relpath='photo.jpg'", (legacy,))
+    p.rename(library / "set0" / "moved.jpg")
+    st = indexer.sync(s)
+    assert st.moved == 1 and st.deleted == 0
 
 
 def test_duplicates_reuse_vectors(library):

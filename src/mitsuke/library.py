@@ -113,6 +113,10 @@ def board_refs(store, bid: int) -> list[dict]:
 # --- folders ----------------------------------------------------------------------------------
 
 def add_folder(store, path: str) -> dict:
+    if not str(path).strip():
+        raise BadRequest("no folder given")
+    if not os.path.isabs(os.path.expanduser(str(path).strip())):  # relative to what? (the server's cwd is arbitrary)
+        raise BadRequest(f"give an absolute path (or one starting with ~): {path}")
     p = os.path.realpath(os.path.abspath(os.path.expanduser(str(path).strip())))
     if not os.path.isdir(p):
         raise BadRequest(f"not a folder: {path}")
@@ -277,9 +281,22 @@ def running_server() -> str | None:
     return None
 
 
+def web_unsupported(refs=(), kinds=None) -> str | None:
+    """Why the web page cannot show this search (None if it can): it only takes library images as query images,
+    and one kind filter it has a button for."""
+    if any("shot" not in r and r.get("file") is None for r in refs or []):
+        return "the web page can only search by images in the library (this one is outside it)"
+    if kinds and (len(kinds) > 1 or kinds[0] not in WEB_KINDS):
+        return f"the web page has no filter for kind {','.join(kinds)} (it has: {', '.join(sorted(WEB_KINDS))})"
+    return None
+
+
 def web_url(base: str, text: str = "", refs=(), board_id: int | None = None, show_board: int | None = None,
-            text_weight: float = 0.5, kinds=None, root: str | None = None) -> str:
-    """A link that opens the web app on this search (the page keeps its state in the URL hash)."""
+            text_weight: float = 0.5, kinds=None, root: str | None = None) -> str | None:
+    """A link that opens the web app on this search (the page keeps its state in the URL hash); None when the page
+    cannot show the same search (see `web_unsupported`) — a link to a different search would mislead."""
+    if web_unsupported(refs, kinds):
+        return None
     p = {}
     if text:
         p["q"] = text
@@ -295,10 +312,10 @@ def web_url(base: str, text: str = "", refs=(), board_id: int | None = None, sho
         p["img"] = ",".join(toks)
     if toks and text and text_weight != 0.5:
         p["w"] = f"{text_weight:g}"
-    if kinds and len(kinds) == 1 and kinds[0] in WEB_KINDS:
+    if kinds:
         p["kind"] = kinds[0]
     if root:
-        p["root"] = root
+        p["root"] = os.path.abspath(os.path.expanduser(root))
     if show_board:
         p["board"] = str(show_board)
     return base + ("#" + urllib.parse.urlencode(p, quote_via=urllib.parse.quote) if p else "")

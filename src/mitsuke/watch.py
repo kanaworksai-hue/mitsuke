@@ -4,7 +4,9 @@ Changes are collected per root and handled once the folder has been quiet for `d
 that is still being written (a big PSD save, a camera import) is picked up once, after it is complete.
 Without watchdog it falls back to polling (a stat walk of every root).
 Roots that are offline (an unplugged drive) or that vanish and come back are noticed by a cheap check every
-`recheck` seconds: they are watched again and rescanned once they are back.
+`recheck` seconds: they are watched again and rescanned once they are back. The same check re-reads the folder
+list from the index, so a folder added or removed by another process (`mitsuke add` while `serve` runs) is
+picked up too.
 """
 
 from __future__ import annotations
@@ -84,6 +86,7 @@ def run(store, roots: dict[int, str], on_change, debounce: float = 2.0, poll: fl
     """Block until `stop` is set (or Ctrl-C). `on_change(set_of_root_ids)` runs on the calling thread.
     `roots` may include offline folders: they are picked up when they come (back) online."""
     stop = stop or threading.Event()
+    roots = dict(roots)
     collector = ChangeCollector(roots, debounce)
     observer = None
     seen = {rid: _identity(p) for rid, p in roots.items()}
@@ -118,6 +121,13 @@ def run(store, roots: dict[int, str], on_change, debounce: float = 2.0, poll: fl
                 last_poll = now
             if now - last_check >= recheck:
                 last_check = now
+                listed = {r["id"]: r["path"] for r in store.roots()} if store is not None else roots
+                if listed != roots:  # folders added / removed elsewhere
+                    roots = listed
+                    collector.roots = ChangeCollector(roots).roots
+                    seen = {rid: seen.get(rid) for rid in roots}  # new ones count as changed below
+                    if observer is not None:
+                        schedule()
                 ids = {rid: _identity(p) for rid, p in roots.items()}
                 changed = {rid for rid in roots if ids[rid] != seen[rid]}
                 if changed:

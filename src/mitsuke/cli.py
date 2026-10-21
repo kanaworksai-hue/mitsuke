@@ -7,6 +7,7 @@ import fcntl
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -84,7 +85,7 @@ def cmd_add(a, out: Out):
     added = []
     for f in a.folders:
         try:
-            r = _lib_call(library.add_folder, store, f)
+            r = _lib_call(library.add_folder, store, _abs(f))
         except CliError as e:
             if not added:
                 raise
@@ -100,15 +101,19 @@ def cmd_add(a, out: Out):
 
 def cmd_remove(a, out: Out):
     store = _store()
-    removed = []
-    for f in a.folders:
+    targets = []
+    for f in a.folders:  # all of them first: a typo in the second must not leave the first one removed unreported
         p = _abs(f)
         match = [r for r in store.roots() if paths.nfc(r["path"]) == paths.nfc(p) or str(r["id"]) == f.lstrip("#")]
         if not match:
             raise CliError(f"not a library folder: {f} (see `mitsuke roots`)")
-        n = store.remove_root(match[0]["id"])
-        removed.append({"path": match[0]["path"], "files": n})
-        out.say(f"removed {match[0]['path']} ({n} files dropped from the index; your images are untouched)")
+        if match[0] not in targets:
+            targets.append(match[0])
+    removed = []
+    for r in targets:
+        n = store.remove_root(r["id"])
+        removed.append({"path": r["path"], "files": n})
+        out.say(f"removed {r['path']} ({n} files dropped from the index; your images are untouched)")
     if out.json:
         out.emit({"removed": removed})
 
@@ -396,7 +401,7 @@ def cmd_similar(a, out: Out):
                     exclude_shots=ex_shots)
     _print_hits(out, store, hits, {"image": path, "in_library": fid is not None,
                                    **({"shot": ref["shot"]} if "shot" in ref else {}),
-                                   "web": _web_link(refs=[ref] if fid is not None else [], a=a)})
+                                   "web": _web_link(refs=[ref], a=a)})
     if a.open and hits:
         _open(hits[0]["path"])
 
@@ -592,6 +597,8 @@ def cmd_web(a, out: Out):
     for r in a.like or []:
         _lib_call(library.board_item, store, r)  # the page can only use indexed library images
     refs = [_lib_call(library.parse_ref, store, r) for r in a.like or []]
+    if why := library.web_unsupported(refs, _kinds(a)):
+        raise CliError(why)
     base = start_server(a.port) if a.start else library.running_server()
     text = " ".join(a.query).strip()
     url = library.web_url(base, text, refs, board_id=a.board if text or refs else None,
@@ -770,12 +777,23 @@ def main(argv=None) -> int:
     try:
         return a.fn(a, out) or 0
     except CliError as e:
-        out.end_progress()
-        if out.json:
-            out.emit({"error": str(e)})
-        else:
-            print(f"mitsuke: {e}", file=sys.stderr)
-        return EXIT_ERROR
+        return _fail(out, str(e))
     except KeyboardInterrupt:
         out.end_progress()
         return EXIT_INTERRUPTED
+    except sqlite3.DatabaseError as e:  # a damaged index.sqlite: say what to do, as JSON too
+        return _fail(out, f"the index database cannot be read ({e}); run `mitsuke doctor`, or move "
+                          f"{paths.home_dir() / 'index.sqlite'} away and index again")
+    except Exception as e:  # noqa: BLE001 — agents parse --json output: an unexpected error must be JSON as well
+        if not out.json:
+            raise
+        return _fail(out, f"{type(e).__name__}: {e}")
+
+
+def _fail(out: Out, msg: str) -> int:
+    out.end_progress()
+    if out.json:
+        out.emit({"error": msg})
+    else:
+        print(f"mitsuke: {msg}", file=sys.stderr)
+    return EXIT_ERROR

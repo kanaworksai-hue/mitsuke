@@ -1,12 +1,14 @@
 """Keep the index in step with the folders on disk.
 
 Two stages, both safe to interrupt at any point:
-1. `sync`  — walk roots, compare (size, mtime_ns) with the index. Changed files get re-hashed (first 1 MB + size):
+1. `sync`  — walk roots, compare (size, mtime_ns) with the index. Changed files get re-hashed (`content_hashes`):
    same hash → only the timestamp is updated; different → re-embed. Files that vanished are matched against new
    files by size + hash, so renames and moves keep their vectors. Offline roots (unplugged drives) are skipped,
    never emptied.
 2. `embed_pending` — decode in a thread pool while the model embeds; results are committed every few files,
    so a Ctrl-C loses at most one small batch and the next run continues from the remaining `pending` rows.
+   Files in offline roots wait (they stay `pending`); a file that has vanished is left to the next `sync`, which
+   deletes it or pairs it with its new name — this stage never deletes rows.
    Videos are cut into segments (`video.py`); each segment gets a vector, the file gets their mean.
 """
 
@@ -22,7 +24,7 @@ import numpy as np
 
 from . import thumbs
 from .decode import VIDEO_EXTS, load_preview
-from .scan import content_hash, kind_of, walk
+from .scan import content_hash, content_hashes, kind_of, walk
 
 PREVIEW_SIDE = 1024
 MIN_SIDE = 64  # longest side; smaller images are icons the model cannot read
@@ -108,10 +110,10 @@ def sync(store, root_ids=None) -> SyncStats:
         cands = by_size.get(size)
         if cands:
             try:
-                sha = content_hash(os.path.join(root_path[rid], rel), size)
+                sha, legacy = content_hashes(os.path.join(root_path[rid], rel), size)
             except OSError:
                 continue
-            match = next((c for c in cands if c["sha1"] == sha), None)
+            match = next((c for c in cands if c["sha1"] in (sha, legacy)), None)
             if match is not None:
                 cands.remove(match)
                 vanished.remove(match)
@@ -221,9 +223,11 @@ def _prepare(job: _Job) -> _Job:
 def embed_pending(store, embedder, tokens: int, limit: int | None = None, workers: int | None = None, on_progress=None):
     """Embed every pending file. Returns counts. Raises KeyboardInterrupt untouched (committed work is kept)."""
     model = embedder.name
+    online = [r["id"] for r in store.roots() if os.path.isdir(r["path"])]
     rows = store.db.execute(
         "SELECT f.id, r.path AS root, f.relpath, f.size, f.mtime_ns FROM files f JOIN roots r ON r.id=f.root_id "
-        "WHERE f.status='pending' ORDER BY f.id" + (f" LIMIT {int(limit)}" if limit else "")
+        f"WHERE f.status='pending' AND f.root_id IN ({','.join('?' * len(online))}) ORDER BY f.id"
+        + (f" LIMIT {int(limit)}" if limit else ""), online
     ).fetchall()
     total = len(rows)
     counts = {"ok": 0, "error": 0, "gone": 0, "reused": 0, "total": total}
@@ -246,7 +250,7 @@ def embed_pending(store, embedder, tokens: int, limit: int | None = None, worker
             for job, vec in finished:
                 counts["gone" if job.gone else "error" if job.error else "ok"] += 1
                 if job.gone:
-                    db.execute("DELETE FROM files WHERE id=?", (job.id,))
+                    pass  # stays pending: the next sync deletes it, or keeps its row if it was moved / renamed
                 elif job.error:
                     db.execute(
                         "UPDATE files SET status='error', error=?, size=?, mtime_ns=?, sha1=?, indexed_at=? WHERE id=?",

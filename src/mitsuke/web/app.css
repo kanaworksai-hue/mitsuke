@@ -11,7 +11,10 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
-body { background: var(--bg); color: var(--fg); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Hiragino Sans", "PingFang SC", "Segoe UI", sans-serif; overflow: hidden; }
+body { background: var(--bg); color: var(--fg); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif; overflow: hidden; line-break: strict; }
+/* CJK glyphs come from the next family after the system (Latin) font: pick it by UI language */
+:lang(zh) body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+:lang(ja) body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", "Noto Sans CJK JP", sans-serif; }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
 input, select { font: inherit; color: inherit; }
 [hidden] { display: none !important; }
@@ -68,6 +71,7 @@ svg { flex: none; }
 .it .x { visibility: hidden; color: var(--dim); }
 .it:hover .x { visibility: visible; }
 .side .add { color: var(--dim); }
+.side .hint { font-size: 12px; line-height: 1.5; }
 .side .inline { display: flex; gap: 6px; padding: 4px 8px; }
 .side .inline input { flex: 1; min-width: 0; background: var(--cell); border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; }
 

@@ -76,3 +76,29 @@ def test_root_that_comes_back_is_watched_again(tmp_path):
     finally:
         stop.set()
         t.join(timeout=10)
+
+
+def test_folder_added_elsewhere_is_picked_up(tmp_path):
+    """`mitsuke add` while `serve` / `index --watch` runs: the watcher re-reads the folder list and scans the new one."""
+    pytest.importorskip("watchdog")
+    from mitsuke.store import Store
+
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    make_image(b / "x.png")
+    s = Store()
+    ra, _ = s.add_root(os.path.realpath(a))
+    seen, stop = [], threading.Event()
+    t = threading.Thread(target=watch.run, args=(s, {ra: os.path.realpath(a)}, seen.append),
+                         kwargs={"debounce": 0.2, "stop": stop, "recheck": 0.2})
+    t.start()
+    try:
+        time.sleep(0.4)
+        rb, _ = s.add_root(os.path.realpath(b))  # another process adds a folder
+        assert _wait_for(lambda: {rb} in seen)
+        seen.clear()
+        make_image(b / "y.png")  # and it is watched from then on
+        assert _wait_for(lambda: {rb} in seen)
+    finally:
+        stop.set()
+        t.join(timeout=10)

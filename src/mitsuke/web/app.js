@@ -55,6 +55,15 @@ function t(key, vars) {
 
 // ---- server -----------------------------------------------------------------------------------
 
+// the server's messages are English: show the common ones in the UI language, keep the rest as they are
+const SERVER_MSG = [[/^image not in the index/, "err_not_indexed"], [/^this board has no indexed images/, "err_board_unindexed"],
+  [/^no such (file|shot)/, "err_no_file"], [/^empty upload/, "not_image"], [/^cannot read this image/, "not_image"]];
+function serverMsg(status, msg) {
+  if (status === 413) return t("err_too_large");
+  const m = SERVER_MSG.find(([re]) => re.test(msg));
+  return m ? t(m[1]) : msg;
+}
+
 async function api(method, path, body, opts = {}) {
   const headers = { "X-Mitsuke": "1", ...(opts.headers || {}) };
   let data = body;
@@ -62,9 +71,10 @@ async function api(method, path, body, opts = {}) {
     headers["Content-Type"] = "application/json";
     data = JSON.stringify(body);
   }
-  const r = await fetch(path, { method, headers, body: data });
+  let r;
+  try { r = await fetch(path, { method, headers, body: data }); } catch { throw Object.assign(new Error(t("server_down")), { status: 0, raw: "" }); }
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { status: r.status });
+  if (!r.ok) { const raw = j.error || r.statusText; throw Object.assign(new Error(serverMsg(r.status, raw)), { status: r.status, raw }); }
   return j;
 }
 
@@ -133,7 +143,7 @@ async function load(more = false, soft = false) {
       r.results = r.results.filter((h) => S.kind === "all" || matchesKind(h));
       r.total = r.results.length;
     } else if (S.view === "search") {
-      const images = S.chips.flatMap((c) => c.board ? c.items : [c.upload ? { upload: c.upload } : c.shot ? { shot: c.shot } : { file: c.file }]);
+      const images = S.chips.map((c) => c.board ? { board: c.board } : c.upload ? { upload: c.upload } : c.shot ? { shot: c.shot } : { file: c.file });
       r = await api("POST", "/api/search", { text: S.text, images, text_weight: S.weight, kinds: kindsParam(), root: S.root, k, offset });
     } else {
       r = await api("POST", "/api/browse", { kinds: kindsParam(), root: S.root, k, offset });
@@ -185,7 +195,7 @@ function renderComposer() {
   const chips = $("#chips");
   chips.innerHTML = "";
   S.chips.forEach((c, i) => {
-    const lab = c.board ? t("chip_board", { name: c.label, n: c.items.length }) : c.upload ? t("chip_dropped") : c.shot ? t("chip_shot", { t: fmtTime(c.time || 0) }) : t("chip_like");
+    const lab = c.board ? t("chip_board", { name: c.label, n: c.n }) : c.upload ? t("chip_dropped") : c.shot ? t("chip_shot", { t: fmtTime(c.time || 0) }) : t("chip_like");
     const ch = el(`<span class="chip" title="${esc(c.label || "")}">${c.thumb ? `<img src="${esc(c.thumb)}">` : ""}<span>${esc(lab)}</span><button title="${esc(t("remove"))}">×</button></span>`);
     ch.querySelector("button").onclick = () => { S.chips.splice(i, 1); go(); };
     chips.append(ch);
@@ -218,7 +228,7 @@ function renderSide() {
   parts.push(`<h4>${esc(t("boards"))}<button data-act="newboard" title="${esc(t("new_board"))}">+</button></h4>`);
   if (S.newBoard) parts.push(`<div class="inline"><input id="boardname" placeholder="${esc(t("board_ph"))}"></div>`);
   for (const b of S.boards) parts.push(`<button class="it ${S.view === "board" && S.board === b.id ? "on" : ""}" data-board="${b.id}">${ICON.board}<span class="nm">${esc(b.name)}</span><span class="n">${num(b.count)}</span></button>`);
-  if (!S.boards.length && !S.newBoard) parts.push(`<div class="it add" style="font-size:12px">${esc(t("boards_hint"))}</div>`);
+  if (!S.boards.length && !S.newBoard) parts.push(`<div class="it add hint">${esc(t("boards_hint"))}</div>`);
   // the sidebar re-renders on every search and status change: keep what is being typed in its inline inputs
   const typed = ["folderpath", "boardname"].map((id) => [id, $("#" + id)?.value, document.activeElement?.id === id]);
   side.innerHTML = parts.join("");
@@ -264,10 +274,10 @@ function renderCrumb() {
   const c = $("#crumb");
   let title, extra = "";
   if (S.view === "board") {
-    title = `${t("board")}: <b>${esc(S.boardName || "")}</b>`;
+    title = `${esc(t("board"))}${esc(t("colon"))}<b>${esc(S.boardName || "")}</b>`;
     extra = `<span class="sp"></span><button data-b="like">${esc(t("search_like_board"))}</button><button data-b="copy">${esc(t("copy_paths"))}</button><button data-b="rename">${esc(t("rename"))}</button><button data-b="delete">${esc(t("delete"))}</button>`;
   } else if (S.view === "search") {
-    const nimg = S.chips.reduce((a, c) => a + (c.board ? c.items.length : 1), 0);
+    const nimg = S.chips.reduce((a, c) => a + (c.board ? c.n : 1), 0);
     const what = [nimg ? esc(t("crumb_images", { n: nimg })) : "", S.text.trim() ? esc(t("quote", { q: S.text.trim() })) : ""].filter(Boolean).join(" + ");
     title = `<b>${what}</b>`;
   } else title = `<b>${esc(S.root ? S.root.split("/").pop() : t("all_images"))}</b>`;
@@ -372,8 +382,8 @@ let inspectReq = 0;
 async function renderInspector() {
   const box = $("#inspector");
   const h = S.results[S.sel];
-  if (!h) { box.innerHTML = `<div class="empty" style="margin:40px 0">${esc(t("nothing_selected"))}</div>`; return; }
   const my = ++inspectReq;
+  if (!h) { box.innerHTML = `<div class="empty" style="margin:40px 0">${esc(t("nothing_selected"))}</div>`; return; }
   const isVideo = h.kind === "video";
   const media = isVideo
     ? `<video src="/api/view/${h.id}#t=${h.time || 0}" muted controls preload="metadata" playsinline></video>`
@@ -406,27 +416,24 @@ async function renderInspector() {
     api("GET", `/api/item/${h.id}`).catch(() => null),
     api("POST", "/api/search", { images: [h.shot ? { shot: h.shot } : { file: h.id }], k: 8 }).catch(() => ({ results: [] })),
   ]);
-  if (my !== inspectReq) return;
+  const meta = $("#meta"), mini = $("#mini");
+  if (my !== inspectReq || !meta || !mini) return;
   if (item) {
-    const meta = $("#meta");
     meta.insertAdjacentHTML("beforeend", `${item.bytes ? `<dt>${esc(t("file_size"))}</dt><dd>${fmtBytes(item.bytes)}</dd>` : ""}${item.mtime ? `<dt>${esc(t("modified"))}</dt><dd>${new Date(item.mtime * 1000).toLocaleString(S.lang)}</dd>` : ""}`);
     if (isVideo && item.shots) {
       const sh = $("#shots");
-      sh.innerHTML = item.shots.map((s) => `<button data-t="${s.time}" data-shot="${s.shot}" class="${s.shot === h.shot ? "on" : ""}" title="${fmtTime(s.t0)}–${fmtTime(s.t1)}"><img loading="lazy" src="${esc(s.thumb)}"><span>${fmtTime(s.t0)}</span></button>`).join("");
-      sh.querySelectorAll("button").forEach((b) => {
+      if (sh) sh.innerHTML = item.shots.map((s) => `<button data-t="${s.time}" data-shot="${s.shot}" class="${s.shot === h.shot ? "on" : ""}" title="${fmtTime(s.t0)}–${fmtTime(s.t1)}"><img loading="lazy" src="${esc(s.thumb)}"><span>${fmtTime(s.t0)}</span></button>`).join("");
+      sh?.querySelectorAll("button").forEach((b) => {
         b.onclick = () => { const v = box.querySelector("video"); v.currentTime = +b.dataset.t; sh.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); };
         b.ondblclick = () => { S.chips = [{ shot: +b.dataset.shot, file: h.id, thumb: b.querySelector("img").src, label: h.name, time: +b.dataset.t }]; S.text = ""; go(); };
       });
     }
   }
-  const mini = $("#mini");
   mini.innerHTML = sim.results.map((s, i) => `<img data-i="${i}" src="${esc(s.thumb)}" title="${esc(s.name)}">`).join("");
   mini.querySelectorAll("img").forEach((im) => im.onclick = () => similar(h));
 }
 
-function boardChip(b) {
-  return { board: b.id, label: b.name, thumb: b.results[0]?.thumb, items: b.results.map((h) => h.shot ? { shot: h.shot } : { file: h.id }) };
-}
+function boardChip(b) { return { board: b.id, label: b.name, thumb: b.results[0]?.thumb, n: b.results.length }; }
 function chipFor(h) { return h.shot ? { shot: h.shot, file: h.id, thumb: h.thumb, label: h.name, time: h.time } : { file: h.id, thumb: h.thumb, label: h.name }; }
 function similar(h) { S.chips = [chipFor(h)]; S.text = ""; go(); }
 
@@ -507,7 +514,8 @@ function boardMenu(h, ev) {
 async function boardAction(a) {
   const bid = S.board;
   if (a === "like") {
-    S.chips = [boardChip({ id: bid, name: S.boardName, results: S.results })]; S.text = ""; S.board = null; return go();
+    const n = S.boards.find((b) => b.id === bid)?.count ?? S.results.length; // S.results may be narrowed by the kind filter
+    S.chips = [{ ...boardChip({ id: bid, name: S.boardName, results: S.results }), n }]; S.text = ""; S.board = null; return go();
   }
   if (a === "copy") return copyText(S.results.map((h) => h.path).join("\n"));
   if (a === "rename") {
@@ -533,15 +541,14 @@ async function refreshFolders() {
 async function addFolder(path) {
   if (!path || !path.trim()) return;
   try {
-    await api("POST", "/api/folders", { path });
+    const r = await api("POST", "/api/folders", { path });
     S.addingFolder = false;
-    toast(t("folder_added"));
+    toast(t(r.new === false ? "folder_exists" : "folder_added"));
     await refreshStatus();
     await refreshFolders();
     if (!S.results.length) load();
   } catch (e) {
-    // the server's messages are English: show the common ones in the UI language
-    toast(/^not a folder/.test(e.message) ? t("not_folder", { path: path.trim() }) : / overlaps with /.test(e.message) ? t("folder_overlap") : e.message);
+    toast(/^not a folder/.test(e.raw) ? t("not_folder", { path: path.trim() }) : / overlaps with /.test(e.raw) ? t("folder_overlap") : e.message);
   }
 }
 
@@ -570,7 +577,7 @@ async function uploadFile(file) {
     S.chips.push({ upload: r.upload, thumb: r.thumb, label: file.name || "" });
     hideToast();
     go();
-  } catch (e) { toast(e.status === 415 ? t("not_image") : e.message); }
+  } catch (e) { toast(e.message); }
 }
 
 function setupDrop() {
@@ -622,7 +629,7 @@ function renderStatus() {
   if (ix.state === "indexing") s = `<span><span class="dot busy"></span>${esc(t("st_indexing", { done: num(ix.done), total: num(ix.total) }))}<span class="bar"><i style="width:${ix.total ? 100 * ix.done / ix.total : 0}%"></i></span>${ix.eta_s != null ? esc(t("st_eta", { t: fmtTime(ix.eta_s) })) : ""}</span>`;
   else if (ix.state === "scanning") s = `<span><span class="dot busy"></span>${esc(t("st_scanning"))}</span>`;
   else if (ix.state === "external") s = `<span><span class="dot busy"></span>${esc(t("st_external"))}</span>`;
-  else if (ix.state === "error") s = `<span><span class="dot err"></span>${esc(ix.message || "error")}</span>`;
+  else if (ix.state === "error") s = `<span><span class="dot err"></span>${esc(t("st_error", { msg: ix.message || "?" }))}</span>`;
   else s = `<span><span class="dot"></span>${esc(t("st_ready", { n: num(st.indexed) }))}</span>`;
   const watch = ix.state === "watching" ? `<span>${esc(t("st_watching", { n: st.roots }))}</span>` : "";
   const errs = st.errors ? `<span>${esc(t("st_errors", { n: num(st.errors) }))}</span>` : "";
@@ -645,16 +652,20 @@ function columns() {
   return n < 0 ? cards.length : n;
 }
 
+function renderKinds() {
+  $("#kinds").innerHTML = KINDS.map(([k]) => `<button data-k="${k}" class="${S.kind === k ? "on" : ""}">${esc(t("kind_" + k))}</button>`).join("");
+  $("#kinds").querySelectorAll("button").forEach((b) => b.onclick = () => { S.kind = b.dataset.k; renderKinds(); go(); });
+}
+
 function applyChrome() {
   document.documentElement.dataset.theme = S.theme;
-  document.documentElement.lang = { zh: "zh-Hans", ja: "ja", en: "en" }[S.lang];
+  document.documentElement.lang = { zh: "zh-Hans", ja: "ja", en: "en" }[S.lang] || "en";
   $("#lang").value = S.lang;
   $("#theme").innerHTML = S.theme === "dark" ? ICON.sun : ICON.moon;
   $("#theme").title = t("theme");
   $("#imgbtn").innerHTML = ICON.img; $("#imgbtn").title = t("img_tip");
   $("#size").value = S.size;
-  $("#kinds").innerHTML = KINDS.map(([k]) => `<button data-k="${k}" class="${S.kind === k ? "on" : ""}">${esc(t("kind_" + k))}</button>`).join("");
-  $("#kinds").querySelectorAll("button").forEach((b) => b.onclick = () => { S.kind = b.dataset.k; applyChrome(); go(); });
+  renderKinds();
   $("#layout").innerHTML = `<button data-l="grid" class="${S.layout === "grid" ? "on" : ""}" title="${esc(t("layout_grid"))}">${ICON.grid}</button><button data-l="rows" class="${S.layout === "rows" ? "on" : ""}" title="${esc(t("layout_rows"))}">${ICON.rows}</button>`;
   $("#layout").querySelectorAll("button").forEach((b) => b.onclick = () => { S.layout = b.dataset.l; localStorage.setItem("mitsuke.layout", S.layout); applyChrome(); renderResults(); });
   document.querySelectorAll("[data-t]").forEach((n) => { if (n.dataset.t && I18N.en[n.dataset.t]) n.textContent = t(n.dataset.t); });
@@ -704,7 +715,7 @@ function setupInputs() {
   });
 }
 
-function renderAll() { renderComposer(); renderSide(); renderCrumb(); renderResults(); renderInspector(); renderStatus(); }
+function renderAll() { renderKinds(); renderComposer(); renderSide(); renderCrumb(); renderResults(); renderInspector(); renderStatus(); }
 
 async function main() {
   applyChrome();

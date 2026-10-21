@@ -15,6 +15,8 @@ import numpy as np
 DEFAULT_MODEL = "mlx-community/embeddinggemma-2-bf16"
 DIM = 768
 QUERY_PREFIX = "task: search result | query: "
+MAX_QUERY_TOKENS = 512
+MAX_QUERY_CHARS = 4000  # before tokenizing; 512 tokens never need more
 QUALITY_TOKENS = {"fast": 70, "default": 140, "best": 280}
 
 
@@ -64,7 +66,9 @@ class MLXEmbedder:
         return _norm(np.concatenate(out)) if out else np.zeros((0, DIM), np.float32)
 
     def embed_texts(self, texts) -> np.ndarray:
-        enc = self.tokenizer([QUERY_PREFIX + t for t in texts], padding=True, return_tensors="np")
+        # A pasted document must not turn into a multi-GB attention matrix: queries are cut to MAX_QUERY_TOKENS.
+        texts = [QUERY_PREFIX + t[:MAX_QUERY_CHARS] for t in texts]
+        enc = self.tokenizer(texts, padding=True, truncation=True, max_length=MAX_QUERY_TOKENS, return_tensors="np")
         return _norm(self._run(dict(enc)))
 
 

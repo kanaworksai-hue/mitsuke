@@ -61,6 +61,8 @@ def test_folders_index_search_boards(server, library):
     r = call(server, "POST", "/api/folders", {"path": str(library)})
     assert r["new"]
     call(server, "POST", "/api/folders", {"path": str(library / "nope")}, expect=400)
+    for empty in ({}, {"path": ""}, {"path": "  "}, {"path": "lib"}):  # not the server's working directory
+        call(server, "POST", "/api/folders", empty, expect=400)
     st = wait_indexed(server, 7)
     assert "voice" not in st and st["kinds"]["png"] == 6
     f = call(server, "GET", "/api/folders")["folders"][0]
@@ -100,6 +102,12 @@ def test_folders_index_search_boards(server, library):
     assert lst[0]["name"] == "Snow refs" and lst[0]["count"] == 2 and len(lst[0]["covers"]) == 2
     like = call(server, "POST", "/api/search", {"images": [{"file": h["id"]} for h in board["results"]], "k": 10})["results"]
     assert len(like) == 5
+    assert [h["id"] for h in call(server, "POST", "/api/search", {"images": [{"board": b["id"]}], "k": 10})["results"]] \
+        == [h["id"] for h in like]
+    from mitsuke.store import Store
+
+    Store().db.execute("DELETE FROM vectors WHERE file_id=?", (first,))  # e.g. changed, waiting to be re-indexed
+    assert len(call(server, "POST", "/api/search", {"images": [{"board": b["id"]}], "k": 10})["results"]) == 6
     call(server, "PATCH", f"/api/boards/{b['id']}", {"name": "Snow"})
     board = call(server, "DELETE", f"/api/boards/{b['id']}/items", {"items": [{"file": first}]})
     assert board["name"] == "Snow" and len(board["results"]) == 1

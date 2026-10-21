@@ -32,7 +32,8 @@ INSTRUCTIONS = """Mitsuke searches the user's own image and video folders on thi
 shots) by description in any language, by example image, or both. Typical flow: `search` (or `similar`) → show the user \
 the best paths (and `view_images` to look at them yourself) → `board_add` to collect picks on a moodboard → `web_link` \
 to give the user a link to the page. Image references: file id (12), video shot (s34) or an absolute path. If the \
-library is empty, ask the user which folders to add, then `add_folder` and `index`."""
+library is empty, ask the user which folders to add, then `add_folder` and `index` (indexing stops when this session \
+ends; for a big library suggest `mitsuke serve`)."""
 
 _ref = {"oneOf": [{"type": "integer"}, {"type": "string"}],
         "description": "file id (12), video shot (\"s34\") or an absolute image path"}
@@ -96,8 +97,9 @@ TOOLS = [
           ["folder"], read_only=False, destructive=True),
     _tool("index", "Index the library",
           "Index new and changed files in the background. Waits up to `wait_seconds` and returns progress; call "
-          "`status` later for the rest. Safe to call again.",
-          {"wait_seconds": {"type": "number", "minimum": 0, "maximum": 600, "default": 60,
+          "`status` later for the rest. Safe to call again. Indexing goes on while this MCP session is open (it stops "
+          "with the session; for a big library suggest `mitsuke serve` or a background `mitsuke index`).",
+          {"wait_seconds": {"type": "number", "minimum": 0, "maximum": 50, "default": 20,
                             "description": "how long to wait for progress before returning (indexing goes on)"}}, read_only=False),
     _tool("web_link", "Link to the web app",
           "A link that opens Mitsuke's local web page on a search or a moodboard (for the user). With start=true the "
@@ -305,7 +307,7 @@ class Mitsuke:
             raise ToolError(f"not a library folder: {folder} (see status)")
         return {"removed": match[0]["path"], "files": self.store.remove_root(match[0]["id"])}
 
-    def index(self, wait_seconds=60):
+    def index(self, wait_seconds=20, _cancel=None):
         if not self.can_index:
             raise ToolError("indexing is turned off for this server (--no-index); run `mitsuke index` instead")
         if not self.store.roots():
@@ -315,7 +317,7 @@ class Mitsuke:
             self.job_state = {"state": "starting"}
             self.job.start()
         t = time.time()
-        while self.job.is_alive() and time.time() - t < float(wait_seconds):
+        while self.job.is_alive() and time.time() - t < float(wait_seconds) and not (_cancel and _cancel.is_set()):
             self.job.join(0.25)
         st = self.status()
         return {"indexing": st["indexing"], "indexed": st["indexed"], "pending": st["pending"], "errors": st["errors"],
@@ -357,14 +359,17 @@ class Mitsuke:
     def web_link(self, query="", like=None, board=None, text_weight=0.5, start=False):
         from .cli import CliError, start_server
 
+        # check everything before starting the page: a link to a missing board / image opens a broken page
+        text = (query or "").strip()
+        if board:
+            library.board_refs(self.store, int(board))  # raises NotFound
+        for r in like or []:
+            library.board_item(self.store, r)  # the page can only use indexed library images
         if start:
             try:
                 start_server()
             except CliError as e:
                 raise ToolError(str(e)) from None
-        text = (query or "").strip()
-        if board:
-            library.board_refs(self.store, int(board))  # raises NotFound
         url = self._web(text, like, board if (text or like) else None, None if (text or like) else board, float(text_weight))
         if url is None:
             return {"running": False, "url": None, "hint": "call web_link with start=true (or run `mitsuke serve`)"}
@@ -495,10 +500,15 @@ def check_args(tool: dict, args) -> dict:
     return out
 
 
+def _id_key(mid):
+    return json.dumps(mid)
+
+
 class Server:
     def __init__(self, out, index: bool = True):
         self.out = out
         self.write_lock = threading.Lock()
+        self.waiting: dict = {}  # request id → Event, for `index` calls still waiting (notifications/cancelled)
         self.app = None
         self.index = index
 
@@ -506,11 +516,12 @@ class Server:
         return TOOLS if self.index else [t for t in TOOLS if t["name"] != "index"]
 
     def send(self, msg):
+        # ASCII-only: a lone surrogate echoed back from a request ("\ud800") cannot be encoded as UTF-8
         with self.write_lock:
-            self.out.write(json.dumps(msg, ensure_ascii=False) + "\n")
+            self.out.write(json.dumps(msg) + "\n")
             self.out.flush()
 
-    def call_tool(self, name, args):
+    def call_tool(self, name, args, cancel=None):
         import base64
 
         tool = next((t for t in self.tools() if t["name"] == name), None)
@@ -521,6 +532,8 @@ class Server:
             args = check_args(tool, args)
             if self.app is None:
                 self.app = Mitsuke(index=self.index)
+            if cancel is not None:
+                args["_cancel"] = cancel
             res = getattr(self.app, name)(**args)
         except (ToolError, library.NotFound, library.BadRequest, ValueError) as e:
             return {"content": [{"type": "text", "text": str(e)}], "isError": True}
@@ -541,6 +554,10 @@ class Server:
             return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32600, "message": "invalid request"}}
         mid, method, params = msg.get("id"), msg["method"], msg.get("params") or {}
         if "id" not in msg:  # notification
+            if method == "notifications/cancelled" and isinstance(params, dict):
+                ev = self.waiting.get(_id_key(params.get("requestId")))
+                if ev is not None:
+                    ev.set()
             return None
         if not isinstance(params, dict):
             return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": "params must be an object"}}
@@ -584,9 +601,26 @@ class Server:
                 replies = [r for r in (self.handle(m) for m in msg) if r is not None]
                 if replies:
                     self.send(replies)
+            elif self._waits(msg):
+                # `index` waits for progress: answer it from a thread so pings and searches are not held up
+                ev = self.waiting[_id_key(msg["id"])] = threading.Event()
+                threading.Thread(target=self._answer_later, args=(msg, ev), name="mitsuke-mcp-answer", daemon=True).start()
             elif (reply := self.handle(msg)) is not None:
                 self.send(reply)
         return 0
+
+    def _waits(self, msg) -> bool:
+        p = msg.get("params") if isinstance(msg, dict) else None
+        return (msg.get("jsonrpc") == "2.0" and msg.get("method") == "tools/call" and "id" in msg
+                and isinstance(p, dict) and p.get("name") == "index" and self.index)
+
+    def _answer_later(self, msg, ev):
+        try:
+            result = self.call_tool("index", msg["params"].get("arguments"), cancel=ev)
+        finally:
+            self.waiting.pop(_id_key(msg["id"]), None)
+        if not ev.is_set():  # a cancelled request gets no reply (MCP spec)
+            self.send({"jsonrpc": "2.0", "id": msg["id"], "result": result})
 
 
 def serve_stdio(index: bool = True) -> int:
