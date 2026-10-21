@@ -1,4 +1,4 @@
-"""Mitsuke 見つけ — local, AI-native image search (EmbeddingGemma 2)."""
+"""Mitsuke 見つけ — local, AI-native image and video search (EmbeddingGemma 2)."""
 
 import os
 

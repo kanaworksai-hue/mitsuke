@@ -1,4 +1,4 @@
-"""`mitsuke mcp`: an MCP server on stdin/stdout, so an agent can search the user's images with tools.
+"""`mitsuke mcp`: an MCP server on stdin/stdout, so an agent can search the user's images and videos with tools.
 
 Plain JSON-RPC 2.0, one message per line (the MCP stdio transport) — no SDK, no extra dependencies. Tools return
 structured JSON (also as text, for clients that ignore `structuredContent`); `view_images` returns one contact-sheet
@@ -61,11 +61,11 @@ def _tool(name, title, description, props=None, required=(), read_only=True, des
 
 
 TOOLS = [
-    _tool("search", "Search images",
+    _tool("search", "Search images and videos",
           "Find images and video shots in the user's library by a description (any language), example images, a "
           "moodboard, or a mix. Results: id, score, path, kind, size, thumbnail path (512 px WebP); videos also the "
           "best shot time.", {**_query, **_filters}),
-    _tool("similar", "Find similar images", "Images that look like one image (in the library or any path).",
+    _tool("similar", "Find similar images and shots", "Images and video shots that look like one image (in the library or any path).",
           {"image": _ref, **_filters}, ["image"]),
     _tool("view_images", "Look at images",
           "One contact-sheet image of up to 24 thumbnails labelled with their ids, to look at results yourself.",
@@ -87,7 +87,7 @@ TOOLS = [
     _tool("board_rename", "Rename a moodboard", "Give a moodboard a new name.",
           {"board": _board, "name": {"type": "string", "description": "the new name"}},
           ["board", "name"], read_only=False),
-    _tool("board_delete", "Delete a moodboard", "Delete a moodboard (the images are untouched).",
+    _tool("board_delete", "Delete a moodboard", "Delete a moodboard (the files are untouched).",
           {"board": _board}, ["board"], read_only=False, destructive=True),
     _tool("status", "Library status", "Folders, what is indexed / pending / failed, and whether indexing is running."),
     _tool("add_folder", "Add a folder", "Add a folder to the library (then call `index`).",

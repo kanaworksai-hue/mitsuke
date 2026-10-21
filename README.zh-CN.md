@@ -34,13 +34,13 @@
 <tr>
 <td align="center" width="25%">🔎<br><b>按意思找</b><br><sub>文字、示例图，或者两者组合，用滑块调节比重</sub></td>
 <td align="center" width="25%">🎞️<br><b>专业格式都能搜</b><br><sub>RAW、PSD / PSB、EXR / HDR、HEIC，视频按镜头搜索</sub></td>
-<td align="center" width="25%">🤖<br><b>agent 能直接用</b><br><sub>MCP 服务器、JSON 输出的命令行和 skill，agent 可以替你找图，再把结果给你看</sub></td>
+<td align="center" width="25%">🤖<br><b>agent 能直接用</b><br><sub>MCP 服务器、JSON 输出的命令行和 skill，agent 可以替你找图片和视频镜头，再把结果给你看</sub></td>
 <td align="center" width="25%">🔒<br><b>完全本地</b><br><sub>在 Apple Silicon 上用 MLX 运行。不用账号、不用上传、不用 API key</sub></td>
 </tr>
 </table>
 
 - **跟得上文件夹的变化：** 网页或 `mitsuke index --watch` 运行期间，新增和修改的文件会自动索引；移动和改名能自动识别，不用重新索引。
-- **灵感板：** 把结果收进灵感板，再“找和这块板相似的图”。
+- **灵感板：** 把结果收进灵感板，再用整块灵感板来找。
 - **不碰你的文件：** Mitsuke 只读不写，索引和缩略图另存在单独的文件夹里。
 
 ## 🧭 原理
@@ -51,12 +51,12 @@ flowchart LR
     I --> M["EmbeddingGemma 2<br/>Apple Silicon 上的 MLX"]
     M --> D["本地索引<br/>SQLite + 向量"]
     Q["“云雾缭绕的水墨山水”<br/>或一张示例图"] --> M
-    M --> S["搜索<br/>和每张图比较"]
+    M --> S["搜索<br/>和每张图、每个镜头比较"]
     D --> S
     S --> R["网页 · 命令行 · MCP<br/>你和你的 agent 都能用"]
 ```
 
-图片和文字会被映射到同一个向量空间，所以无论是一句话、一张图还是两者组合，都能直接和资料库里的每张图比较。
+图片和文字会被映射到同一个向量空间，所以无论是一句话、一张图还是两者组合，都能直接和资料库里的每张图、每个视频镜头比较。
 
 ## 🚀 快速开始
 
@@ -122,7 +122,7 @@ mitsuke similar ~/Desktop/this_composition.jpg
 
 - **一个搜索框搞定：** 用任何语言输入（也可以用你平时的语音输入法），或者拖入、粘贴、选择一张图片。图片和文字可以组合（“这个构图”+“夜晚”），用滑块调节两者的比重。
 - **视频：** 每个视频都会按镜头切分。搜索会直接定位到对应的镜头，从那里开始播放。
-- **灵感板：** 把结果拖到灵感板上（或按 <kbd>B</kbd>），再用整块灵感板来找相似的图。
+- **灵感板：** 把结果拖到灵感板上（或按 <kbd>B</kbd>），再用整块灵感板来找。
 - **顺手好用：** 方格或按原比例排列、缩略图大小滑块、全屏预览（<kbd>Space</kbd>）、方向键切换、<kbd>S</kbd> 找相似、<kbd>R</kbd> 在访达中显示，还可以按文件夹和类型筛选。在 Chrome 或 Edge 里，把结果拖到访达就能得到原文件的副本。
 
 ## 📋 命令
@@ -131,7 +131,7 @@ mitsuke similar ~/Desktop/this_composition.jpg
 |---|---|
 | `mitsuke add <folder>…` / `remove <folder>…` / `roots` | 管理资料库里的文件夹（移除不会动你的文件） |
 | `mitsuke index [--watch] [--quality fast\|default\|best]` | 索引新增和修改的文件。`--watch` 持续运行，跟着文件变化更新 |
-| `mitsuke search "<text>" [-k 20] [--root F] [--kind raw,psd,exr,video]` | 用文字找图片（和视频镜头） |
+| `mitsuke search "<text>" [-k 20] [--root F] [--kind raw,psd,exr,video]` | 用文字找图片和视频镜头 |
 | `mitsuke search ["<text>"] [--like <image>…] [--board ID] [--text-weight 0.5]` | 图片 + 文字（“像这张，但是夜晚”），或用整块灵感板来搜 |
 | `mitsuke similar <image or id>` | 找看起来相似的图片（资料库外的图片也可以） |
 | `mitsuke board list\|create\|show\|add\|remove\|rename\|delete` | 灵感板（和网页共用） |
@@ -205,7 +205,7 @@ EmbeddingGemma 2 是多语言模型。中文、日文、英文的效果都很好
 
 ## ⭐ 喜欢就点个 Star
 
-如果 Mitsuke 帮你找到了需要的图，请在[仓库页面](https://github.com/kanaworksai-hue/mitsuke)顶部点一下 **⭐ Star**。不花钱，一秒钟就好，对项目的帮助却比你想的大得多：
+如果 Mitsuke 帮你找到了需要的图或镜头，请在[仓库页面](https://github.com/kanaworksai-hue/mitsuke)顶部点一下 **⭐ Star**。不花钱，一秒钟就好，对项目的帮助却比你想的大得多：
 
 - **让更多人看到它。** Star 越多，项目在 GitHub 上越容易被发现，也就会有更多画师和影视工作者用上它。
 - **让更新持续下去。** 每个 Star 都在告诉我们有人觉得它有用，这正是继续开发新功能的动力。

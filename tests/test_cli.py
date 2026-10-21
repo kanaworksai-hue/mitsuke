@@ -130,7 +130,7 @@ def test_human_output(library, capsys):
     main(["index"])
     main(["search", "sunset"])
     text = capsys.readouterr().out
-    assert "indexed 7 images" in text and "1. " in text
+    assert "indexed 7 files" in text and "1. " in text
 
 
 def test_doctor_json(capsys):

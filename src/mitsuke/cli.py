@@ -113,7 +113,7 @@ def cmd_remove(a, out: Out):
     for r in targets:
         n = store.remove_root(r["id"])
         removed.append({"path": r["path"], "files": n})
-        out.say(f"removed {r['path']} ({n} files dropped from the index; your images are untouched)")
+        out.say(f"removed {r['path']} ({n} files dropped from the index; your files are untouched)")
     if out.json:
         out.emit({"removed": removed})
 
@@ -215,7 +215,7 @@ def cmd_index(a, out: Out):
             if out.json:
                 out.emit({"event": "indexed", **counts})
             else:
-                out.say(f"indexed {counts['ok']} images ({counts['error']} errors) in {_fmt_eta(counts['seconds'])}"
+                out.say(f"indexed {counts['ok']} files ({counts['error']} errors) in {_fmt_eta(counts['seconds'])}"
                         + (" — see `mitsuke status` for errors" if counts["error"] else ""))
         return st
 
@@ -245,7 +245,7 @@ def cmd_index(a, out: Out):
         if out.json:
             out.emit({"event": "interrupted", "pending": left})
         else:
-            out.say(f"stopped. {left} images still to index — run `mitsuke index` again to continue." if left
+            out.say(f"stopped. {left} files still to index — run `mitsuke index` again to continue." if left
                     else "stopped. Everything is indexed.")
         return EXIT_INTERRUPTED
 
@@ -429,7 +429,7 @@ def cmd_status(a, out: Out):
     if out.json:
         out.emit(info)
         return
-    out.say(f"Mitsuke {info['version']} — {info['indexed']} images indexed, {info['pending']} pending, {info['errors']} errors")
+    out.say(f"Mitsuke {info['version']} — {info['indexed']} files indexed, {info['pending']} pending, {info['errors']} errors")
     out.say(f"model {info['model']} · quality {quality} · index {info['index']} ({info['index_mb']} MB)")
     for r in roots:
         out.say(f"  #{r['id']} {r['path']}: {r['ok']} indexed, {r['pending']} pending, {r['error']} errors" + ("" if r["online"] else "  [offline]"))
@@ -535,7 +535,7 @@ def cmd_board(a, out: Out):
     if out.json:
         out.emit(r)
     else:
-        out.say(f"renamed #{bid} to {r['name']}" if act == "rename" else f"deleted board #{bid} (the images are untouched)")
+        out.say(f"renamed #{bid} to {r['name']}" if act == "rename" else f"deleted board #{bid} (the files are untouched)")
 
 
 def cmd_show(a, out: Out):
@@ -695,7 +695,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("roots", parents=[common], help="list library folders")
     s.set_defaults(fn=cmd_roots)
 
-    s = sub.add_parser("index", parents=[common], help="index new and changed images (safe to stop and re-run)")
+    s = sub.add_parser("index", parents=[common], help="index new and changed files (safe to stop and re-run)")
     s.add_argument("--watch", action="store_true", help="keep running and index changes as they happen")
     s.add_argument("--quality", choices=list(QUALITY_TOKENS), help="fast / default / best (changing it re-indexes)")
     s.add_argument("--limit", type=int, help="index at most N images this run")
@@ -713,13 +713,13 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--board", type=lambda v: int(v.lstrip("#")), help="also search by the images on this moodboard")
         s.add_argument("--text-weight", type=float, help="0 = only the images, 1 = only the words (default 0.5)")
 
-    s = sub.add_parser("search", parents=[common], help="find images by describing them (any language), optionally plus images")
+    s = sub.add_parser("search", parents=[common], help="find images and video shots by describing them (any language), optionally plus example images")
     s.add_argument("query", nargs="*")
     query_images(s)
     filters(s)
     s.set_defaults(fn=cmd_search)
-    s = sub.add_parser("similar", parents=[common], help="find images that look like an image")
-    s.add_argument("image", help="image path (inside or outside the library) or #id")
+    s = sub.add_parser("similar", parents=[common], help="find images and video shots that look like an image")
+    s.add_argument("image", help="image path (inside or outside the library), #id or s<shot>")
     filters(s)
     s.set_defaults(fn=cmd_similar)
 

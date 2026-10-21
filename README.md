@@ -34,7 +34,7 @@ Use it in a local web app, from the command line, or let your AI agent (Claude C
 <tr>
 <td align="center" width="25%">🔎<br><b>Search by meaning</b><br><sub>Words, an example image, or both, with a slider to balance them</sub></td>
 <td align="center" width="25%">🎞️<br><b>Made for real libraries</b><br><sub>RAW, PSD / PSB, EXR / HDR, HEIC, and videos searched shot by shot</sub></td>
-<td align="center" width="25%">🤖<br><b>Agent-ready</b><br><sub>MCP server, JSON CLI and a skill, so your agent can find images and show them to you</sub></td>
+<td align="center" width="25%">🤖<br><b>Agent-ready</b><br><sub>MCP server, JSON CLI and a skill, so your agent can find images and video shots and show them to you</sub></td>
 <td align="center" width="25%">🔒<br><b>Local</b><br><sub>Runs on Apple Silicon with MLX. No account, no upload, no API key</sub></td>
 </tr>
 </table>
@@ -51,12 +51,12 @@ flowchart LR
     I --> M["EmbeddingGemma 2<br/>MLX on Apple Silicon"]
     M --> D["Local index<br/>SQLite + vectors"]
     Q["“foggy bridge at dawn”<br/>or an example image"] --> M
-    M --> S["Search<br/>compare with every indexed image"]
+    M --> S["Search<br/>compare with every image and shot"]
     D --> S
     S --> R["Web app · CLI · MCP<br/>for you and your agent"]
 ```
 
-Images and words are mapped into the same embedding space, so a sentence, a picture, or a mix of both can be compared with every image in your library.
+Images and words are mapped into the same embedding space, so a sentence, a picture, or a mix of both can be compared with every image and video shot in your library.
 
 ## 🚀 Quick start
 
@@ -131,7 +131,7 @@ If you set `HF_HOME` or `MITSUKE_HOME` in your shell, pass them in an `"env"` bl
 |---|---|
 | `mitsuke add <folder>…` / `remove <folder>…` / `roots` | Manage library folders (removing never touches your files) |
 | `mitsuke index [--watch] [--quality fast\|default\|best]` | Index new and changed files. `--watch` keeps running and follows changes |
-| `mitsuke search "<text>" [-k 20] [--root F] [--kind raw,psd,exr,video]` | Find images (and video shots) by description |
+| `mitsuke search "<text>" [-k 20] [--root F] [--kind raw,psd,exr,video]` | Find images and video shots by description |
 | `mitsuke search ["<text>"] [--like <image>…] [--board ID] [--text-weight 0.5]` | Image + words ("like this, but at night"), or a whole moodboard as the query |
 | `mitsuke similar <image or id>` | Find images that look like an image (inside or outside the library) |
 | `mitsuke board list\|create\|show\|add\|remove\|rename\|delete` | Moodboards (shared with the web app) |
@@ -205,7 +205,7 @@ Issues and pull requests are welcome.
 
 ## ⭐ Like it? Star it
 
-If Mitsuke found an image you needed, please click **⭐ Star** at the top of the [repository page](https://github.com/kanaworksai-hue/mitsuke). It's free, takes a second, and helps more than you might think:
+If Mitsuke found an image or shot you needed, please click **⭐ Star** at the top of the [repository page](https://github.com/kanaworksai-hue/mitsuke). It's free, takes a second, and helps more than you might think:
 
 - **More people find it.** Stars make the project easier to discover on GitHub, so more artists and filmmakers get to use it.
 - **It keeps the project going.** Every star shows that people find Mitsuke useful, and that's what keeps new features coming.

@@ -1,11 +1,11 @@
 ---
 name: mitsuke
-description: Search the user's own image and video folders on this Mac with Mitsuke 見つけ (local AI image and video search, EmbeddingGemma 2) — by description in any language, by example image, or image + words ("like this, but at night"); collect picks on moodboards and hand the user a link to the web app. Use whenever the user wants to find a picture, photo, reference, texture, concept art, RAW / PSD / EXR / HDR file or a shot inside their videos in their own files, asks "where is that image of…", wants references for a mood or a moodboard, or wants to add folders to or check the image index — even if they do not say "Mitsuke".
+description: Search the user's own image and video folders on this Mac with Mitsuke 見つけ (local AI image and video search, EmbeddingGemma 2) — by description in any language, by example image, or image + words ("like this, but at night"); collect picks on moodboards and hand the user a link to the web app. Use whenever the user wants to find a picture, photo, reference, texture, concept art, RAW / PSD / EXR / HDR file or a shot inside their videos in their own files, asks "where is that image of…", wants references for a mood or a moodboard, or wants to add folders to or check the index — even if they do not say "Mitsuke".
 license: MIT
 compatibility: macOS on Apple Silicon. Needs the `mitsuke` command (see INSTALL.md in the Mitsuke repository); the MCP tools are used when the `mitsuke` MCP server is connected.
 ---
 
-# Mitsuke 見つけ — find images in the user's folders
+# Mitsuke 見つけ — find images and video shots in the user's folders
 
 Mitsuke keeps a local index of the folders the user added (photos, camera RAW, PSD/PSB, EXR/HDR, video shot by
 shot) and searches it by meaning: words in any language, example images, or both. Everything stays on this Mac.
@@ -70,7 +70,7 @@ Filters on searches: `k` (number of results, default 20), `root` (only inside a 
    give the user the link to the board.
 2. **"Where is that picture of…"**: `search` → if unsure, `view_images` on the top 6 → `file_info` / `open_file`
    with `reveal: true` if the user wants it in Finder.
-3. **Empty library** (results empty with a hint): ask the user which folders hold their images, `add_folder` each,
+3. **Empty library** (results empty with a hint): ask the user which folders hold their images and videos, `add_folder` each,
    `index` (it continues in the background while this MCP session is open; `status` shows progress; searching
    works while it runs; for a big library suggest `mitsuke serve`, which keeps going after the session). In the CLI,
    `mitsuke index` blocks until done — for big folders run it in the background or suggest `mitsuke serve`,

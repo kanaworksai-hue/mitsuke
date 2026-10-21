@@ -77,8 +77,8 @@ mitsuke skill install                       # Claude Code: ~/.claude/skills/mits
 mitsuke skill install --dir <skills folder> # other agents: their skills folder (e.g. ~/.codex/skills, ~/.agents/skills)
 ```
 
-If your agent has no skills folder, add a short note to its global instructions instead: "To find images in the
-user's folders, use Mitsuke (`mitsuke --help`, every command takes `--json`; MCP server `mitsuke mcp`)".
+If your agent has no skills folder, add a short note to its global instructions instead: "To find images or video
+shots in the user's folders, use Mitsuke (`mitsuke --help`, every command takes `--json`; MCP server `mitsuke mcp`)".
 `mitsuke skill show` prints the skill text.
 
 **MCP server** (only if you chose MCP). Use the absolute path of the command — desktop apps do not search your
@@ -126,6 +126,6 @@ first search in their own words.
   (`MITSUKE_HOME=<dir>` moves both). Model: the Hugging Face cache (`~/.cache/huggingface`).
 - Uninstall: `claude mcp remove mitsuke` (if registered), `rm -r ~/.claude/skills/mitsuke`,
   `uv tool uninstall mitsuke`, and — only if the user wants their index gone too — delete the two data folders above.
-  The user's images are never modified by Mitsuke.
+  The user's files are never modified by Mitsuke.
 - Troubleshooting: `mitsuke doctor --json`. "another `mitsuke index` is already running" means an indexer (CLI,
   web app or MCP) is busy — searching still works.
