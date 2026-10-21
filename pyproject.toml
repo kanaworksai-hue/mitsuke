@@ -1,0 +1,44 @@
+[project]
+name = "mitsuke"
+version = "0.3.0"
+description = "Local, AI-native image search for artists and film makers (EmbeddingGemma 2)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "東京AI映像合同会社", email = "kana@tokyoaivisuals.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "mlx>=0.32.4",
+    "mlx-vlm>=0.7.8",
+    "numpy>=2.5.4",
+    "opencv-python>=5.0",
+    "pillow>=13.0.0",
+    "pillow-heif>=1.8.1",
+    "psd-tools>=1.25.0",
+    "rawpy>=0.27.1",
+    "transformers>=5.20",
+    "watchdog>=6.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/kanaworksai-hue/mitsuke"
+Issues = "https://github.com/kanaworksai-hue/mitsuke/issues"
+
+[project.scripts]
+mitsuke = "mitsuke:main"
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not model'"
+markers = ["model: needs the real EmbeddingGemma 2 weights and Apple Silicon (run with `-m model`)"]

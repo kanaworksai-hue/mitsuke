@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mitsuke 見つけ</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='14' cy='14' r='9' fill='none' stroke='%23ffb547' stroke-width='4'/><path d='M21 21l7 7' stroke='%23ffb547' stroke-width='4' stroke-linecap='round'/></svg>">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="app">
+  <header class="tb">
+    <div class="logo"><b>見つけ</b><span>Mitsuke</span></div>
+    <div class="composer" id="composer">
+      <div class="row">
+        <span class="ic">⌕</span>
+        <div class="chips" id="chips"></div>
+        <input id="q" autocomplete="off" spellcheck="false">
+        <button class="ib" id="clear" hidden>×</button>
+        <button class="ib" id="imgbtn"></button>
+        <input type="file" id="file" accept="image/*,.psd,.psb,.exr,.hdr,.heic,.tif,.tiff,.dng,.cr2,.cr3,.nef,.arw,.raf" hidden>
+      </div>
+      <div class="mix" id="mix" hidden>
+        <span data-t="mix_image"></span>
+        <input type="range" id="weight" min="0" max="100" value="50">
+        <span data-t="mix_text" class="acc"></span>
+        <span class="mixval" id="mixval"></span>
+      </div>
+    </div>
+    <div class="seg" id="kinds"></div>
+    <div class="tools">
+      <label class="size"><input type="range" id="size" min="110" max="360" value="180"></label>
+      <div class="seg" id="layout"></div>
+      <select id="lang"><option value="zh">中文</option><option value="ja">日本語</option><option value="en">English</option></select>
+      <button class="ib" id="theme"></button>
+    </div>
+  </header>
+  <nav class="side" id="side"></nav>
+  <main class="center">
+    <div class="crumb" id="crumb"></div>
+    <div class="results" id="results"></div>
+  </main>
+  <aside class="inspector" id="inspector"></aside>
+  <footer class="status" id="status"></footer>
+</div>
+<div class="loupe" id="loupe" hidden></div>
+<div class="dropzone" id="dropzone" hidden><div data-t="drop_here"></div></div>
+<div class="toast" id="toast" hidden></div>
+<script src="/static/i18n.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

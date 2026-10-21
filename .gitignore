@@ -1,0 +1,17 @@
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+
+# Local data and outputs
+data/
+out/
+
+# OS / editor / agent folders
+.DS_Store
+Thumbs.db
+.claude/
