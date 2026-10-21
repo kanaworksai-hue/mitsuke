@@ -1,6 +1,8 @@
 import json
 import os
 
+import pytest
+
 from mitsuke.cli import main
 
 
@@ -149,6 +151,8 @@ def test_unicode_normalisation(tmp_path, capsys):
     nfc, nfd = (unicodedata.normalize(f, str(tmp_path / "ガイド")) for f in ("NFC", "NFD"))
     make_image(nfc + "/a.png", seed=1)
     make_image(unicodedata.normalize("NFD", nfc + "/パゴダ.png"), seed=2)  # a decomposed name on disk
+    if not os.path.exists(unicodedata.normalize("NFC", nfc + "/パゴダ.png")):
+        pytest.skip("this file system keeps NFC and NFD names apart (Linux); macOS treats them as one name")
     _, out = run(capsys, "add", nfc)
     code, again = run(capsys, "add", nfd)
     assert code == 0 and again[0]["added"][0]["new"] is False  # not a second root indexing everything twice
